@@ -53,22 +53,27 @@
         key_name: "{{ vm_keypair }}"
         userdata: "{{ cloud_init }}"
         wait: yes
+        timeout: 600
       register: app_vm
 
-    - set_fact:
+    - name: Extract APP IP
+      set_fact:
         app_ip: "{{ app_vm.server.addresses | dict2items | map(attribute='value') | first | selectattr('version','equalto',4) | map(attribute='addr') | first }}"
 
-    - set_stats:
+    - name: Expose APP IP to workflow
+      set_stats:
         data:
           app_ip: "{{ app_ip }}"
 
-    - wait_for:
+    - name: Wait for SSH
+      wait_for:
         host: "{{ app_ip }}"
         port: 22
         delay: 40
         timeout: 600
 
-    - add_host:
+    - name: Add APP host
+      add_host:
         name: "{{ app_ip }}"
         groups: app
         ansible_user: root
@@ -80,10 +85,10 @@
 - name: App Tier - App Setup
   hosts: app
   become: yes
-  gather_facts: yes
+  gather_facts: no   # ✅ prevents hanging here
 
   vars:
-    db_host: "{{ db_ip }}"
+    db_host: "{{ db_ip }}"   # comes from DB job via workflow
 
   tasks:
     - name: Install dependencies
@@ -94,12 +99,12 @@
         state: present
         update_cache: yes
 
-    - pip:
+    - name: Install PyMySQL
+      pip:
         name: pymysql
 
     - name: Allow APP port
-      shell: |
-        ufw allow 8080 || true
+      shell: ufw allow 8080 || true
 
     - name: Deploy application
       copy:
