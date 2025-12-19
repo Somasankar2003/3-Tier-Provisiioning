@@ -68,7 +68,7 @@
         name: "{{ web_ip }}"
         groups: web
         ansible_user: root
-        ansible_password: StrongPasswordHere
+        ansible_password: Stackmax
 
 ###############################################################################
 # WEB TIER – NGINX
