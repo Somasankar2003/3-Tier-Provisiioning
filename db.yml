@@ -68,7 +68,7 @@
         name: "{{ db_ip }}"
         groups: db
         ansible_user: root
-        ansible_password: StrongPasswordHere
+        ansible_password: Stackmax
 
 ###############################################################################
 # DB TIER – MYSQL SETUP
