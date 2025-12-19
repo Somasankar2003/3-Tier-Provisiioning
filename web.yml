@@ -22,8 +22,7 @@
     os_interface: "public"
 
   tasks:
-    - name: Verify Web VM name
-      debug:
+    - debug:
         msg: "Web VM name is {{ vm_name_web }}"
 
     - name: Create Web VM
@@ -42,17 +41,35 @@
         flavor: "{{ vm_flavor }}"
         key_name: "{{ vm_keypair }}"
         network: "{{ vm_net }}"
+        security_groups: [default]
         wait: yes
         timeout: 600
       register: web_vm
 
-    - name: Add Web VM to inventory
-      add_host:
-        name: "{{ web_vm.server.public_v4 }}"
+    - set_fact:
+        web_ip: >-
+          {{
+            web_vm.server.addresses
+            | dict2items
+            | map(attribute='value')
+            | first
+            | selectattr('version','equalto',4)
+            | map(attribute='addr')
+            | first
+          }}
+
+    - wait_for:
+        host: "{{ web_ip }}"
+        port: 22
+        delay: 20
+        timeout: 300
+
+    - add_host:
+        name: "{{ web_ip }}"
         groups: web
 
 ###############################################################################
-# WEB TIER – NGINX REVERSE PROXY
+# WEB TIER – NGINX
 ###############################################################################
 - name: Web Tier - Nginx Setup
   hosts: web
@@ -63,14 +80,12 @@
     app_ip: "{{ hostvars['localhost']['app_ip'] }}"
 
   tasks:
-    - name: Install Nginx
-      apt:
+    - apt:
         name: nginx
         state: present
         update_cache: yes
 
-    - name: Configure Nginx reverse proxy
-      copy:
+    - copy:
         dest: /etc/nginx/sites-available/default
         content: |
           server {
@@ -80,8 +95,7 @@
               }
           }
 
-    - name: Restart Nginx
-      service:
+    - service:
         name: nginx
         state: restarted
         enabled: yes
