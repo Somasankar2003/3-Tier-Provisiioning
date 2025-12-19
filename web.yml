@@ -1,5 +1,5 @@
 ###############################################################################
-# WEB TIER – VM CREATION
+# WEB TIER – VM CREATION (IMAGE ONLY, NO VOLUME)
 ###############################################################################
 - name: Web Tier - VM Creation
   hosts: localhost
@@ -35,8 +35,9 @@
         - systemctl restart ssh || systemctl restart sshd
 
   tasks:
-    - name: Create WEB VM
+    - name: Create WEB VM (boot from image only)
       openstack.cloud.server:
+        state: present                # ✅ important
         auth:
           auth_url: "{{ os_auth_url }}"
           username: "{{ os_username }}"
@@ -47,31 +48,44 @@
         region_name: "{{ os_region_name }}"
         interface: "{{ os_interface }}"
         name: "{{ vm_name_web }}"
-        image: "{{ vm_image }}"
+        image: "{{ vm_image }}"        # ✅ image boot
         flavor: "{{ vm_flavor }}"
         network: "{{ vm_net }}"
         key_name: "{{ vm_keypair }}"
         userdata: "{{ cloud_init }}"
         wait: yes
+        timeout: 600
       register: web_vm
 
-    - set_fact:
-        web_ip: "{{ web_vm.server.addresses | dict2items | map(attribute='value') | first | selectattr('version','equalto',4) | map(attribute='addr') | first }}"
+    - name: Extract WEB IP
+      set_fact:
+        web_ip: >-
+          {{
+            web_vm.server.addresses
+            | dict2items
+            | map(attribute='value')
+            | first
+            | selectattr('version','equalto',4)
+            | map(attribute='addr')
+            | first
+          }}
 
-    - wait_for:
+    - name: Wait for SSH on WEB VM
+      wait_for:
         host: "{{ web_ip }}"
         port: 22
         delay: 40
         timeout: 600
 
-    - add_host:
+    - name: Add WEB host
+      add_host:
         name: "{{ web_ip }}"
         groups: web
         ansible_user: root
         ansible_password: Stackmax
 
 ###############################################################################
-# WEB TIER – NGINX
+# WEB TIER – NGINX (PROXY TO APP TIER)
 ###############################################################################
 - name: Web Tier - Nginx Setup
   hosts: web
@@ -79,25 +93,38 @@
   gather_facts: yes
 
   vars:
-    app_ip: "{{ hostvars['localhost']['app_ip'] }}"
+    app_backend_ip: "{{ app_ip }}"
+
+  pre_tasks:
+    - name: Validate APP IP from workflow
+      fail:
+        msg: >
+          app_ip is not defined.
+          Run this job ONLY via Workflow (DB → APP → WEB).
+      when: app_backend_ip is not defined
 
   tasks:
-    - apt:
+    - name: Install nginx
+      apt:
         name: nginx
         state: present
         update_cache: yes
 
-    - copy:
+    - name: Configure nginx reverse proxy
+      copy:
         dest: /etc/nginx/sites-available/default
         content: |
           server {
             listen 80;
             location / {
-              proxy_pass http://{{ app_ip }}:8080;
+              proxy_pass http://{{ app_backend_ip }}:8080;
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
             }
           }
 
-    - service:
+    - name: Restart nginx
+      service:
         name: nginx
         state: restarted
         enabled: yes
