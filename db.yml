@@ -21,14 +21,9 @@
     os_region_name: "RegionOne"
     os_interface: "public"
 
+    # ✅ SAFE cloud-init (no user creation)
     cloud_init: |
       #cloud-config
-      users:
-        - default
-        - name: ansible
-          sudo: ALL=(ALL) NOPASSWD:ALL
-          shell: /bin/bash
-          groups: sudo
       disable_root: true
       ssh_pwauth: false
 
@@ -65,10 +60,10 @@
     - add_host:
         name: "{{ db_ip }}"
         groups: db
-        ansible_user: ansible
+        ansible_user: ubuntu
 
 ###############################################################################
-# DB TIER – MYSQL
+# DB TIER – MYSQL SETUP
 ###############################################################################
 - name: DB Tier - MySQL Setup
   hosts: db
