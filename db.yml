@@ -23,6 +23,10 @@
     os_identity_api_version: "3"
 
   tasks:
+    - name: Verify DB VM name from survey
+      debug:
+        msg: "DB VM name is {{ vm_name_db }}"
+
     - name: Create DB VM
       openstack.cloud.server:
         auth:
@@ -36,7 +40,7 @@
         interface: "{{ os_interface }}"
         api_version: "{{ os_identity_api_version }}"
 
-        name: "{{ vm_name }}"
+        name: "{{ vm_name_db }}"
         image: "{{ vm_image }}"
         flavor: "{{ vm_flavor }}"
         key_name: "{{ vm_keypair }}"
@@ -46,7 +50,7 @@
         timeout: 600
       register: db_vm
 
-    - name: Save DB IP for next plays
+    - name: Save DB IP
       set_fact:
         db_ip: "{{ db_vm.server.public_v4 }}"
 
@@ -90,13 +94,13 @@
 
     - name: Create application database
       shell: |
-        mysql -e "CREATE DATABASE IF NOT EXISTS {{ db_name }};"
+        mysql --protocol=socket -e "CREATE DATABASE IF NOT EXISTS {{ db_name }};"
       args:
         executable: /bin/bash
 
     - name: Create application DB user and grant privileges
       shell: |
-        mysql -e "
+        mysql --protocol=socket -e "
         CREATE USER IF NOT EXISTS '{{ db_user }}'@'%' IDENTIFIED BY '{{ db_password }}';
         GRANT ALL PRIVILEGES ON {{ db_name }}.* TO '{{ db_user }}'@'%';
         FLUSH PRIVILEGES;
@@ -106,7 +110,7 @@
 
     - name: Create users table
       shell: |
-        mysql {{ db_name }} -e "
+        mysql --protocol=socket {{ db_name }} -e "
         CREATE TABLE IF NOT EXISTS users (
           id INT AUTO_INCREMENT PRIMARY KEY,
           name VARCHAR(50)
