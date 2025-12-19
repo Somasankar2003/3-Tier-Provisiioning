@@ -17,7 +17,6 @@
     os_project_domain_id: "default"
     os_username: "admin"
     os_user_domain_name: "Default"
-    os_password: "{{ os_password }}"
     os_region_name: "RegionOne"
     os_interface: "public"
 
@@ -49,13 +48,12 @@
         flavor: "{{ vm_flavor }}"
         key_name: "{{ vm_keypair }}"
         network: "{{ vm_net }}"
-        security_groups: [default]
         userdata: "{{ cloud_init }}"
+        security_groups: [default]
         wait: yes
       register: web_vm
 
-    - name: Extract Web private IP
-      set_fact:
+    - set_fact:
         web_ip: >-
           {{
             web_vm.server.addresses
@@ -74,7 +72,7 @@
         groups: web
 
 ###############################################################################
-# WEB TIER – NGINX CONFIGURATION
+# WEB TIER – NGINX SETUP
 ###############################################################################
 - name: Web Tier - Nginx Setup
   hosts: web
@@ -85,14 +83,12 @@
     app_ip: "{{ hostvars['localhost']['app_ip'] }}"
 
   tasks:
-    - name: Install Nginx
-      apt:
+    - apt:
         name: nginx
         state: present
         update_cache: yes
 
-    - name: Configure Nginx reverse proxy
-      copy:
+    - copy:
         dest: /etc/nginx/sites-available/default
         content: |
           server {
@@ -102,8 +98,7 @@
               }
           }
 
-    - name: Restart Nginx
-      service:
+    - service:
         name: nginx
         state: restarted
         enabled: yes
