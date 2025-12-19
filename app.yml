@@ -57,31 +57,20 @@
 
     - name: Extract APP IP
       set_fact:
-        app_ip: >-
-          {{
-            app_vm.server.addresses
-            | dict2items
-            | map(attribute='value')
-            | first
-            | selectattr('version','equalto',4)
-            | map(attribute='addr')
-            | first
-          }}
+        app_ip: "{{ app_vm.server.addresses | dict2items | map(attribute='value') | first | selectattr('version','equalto',4) | map(attribute='addr') | first }}"
 
     - name: Expose APP IP to workflow
       set_stats:
         data:
           app_ip: "{{ app_ip }}"
 
-    - name: Wait for SSH on APP VM
-      wait_for:
+    - wait_for:
         host: "{{ app_ip }}"
         port: 22
         delay: 40
         timeout: 600
 
-    - name: Add APP host
-      add_host:
+    - add_host:
         name: "{{ app_ip }}"
         groups: app
         ansible_user: root
@@ -96,16 +85,14 @@
   gather_facts: yes
 
   vars:
-    # db_ip MUST come from DB job via set_stats (workflow)
-    db_host: "{{ db_ip | default(db_ip_fallback, true) }}"
+    db_host: "{{ db_ip | default(db_ip_fallback | default(omit), true) }}"
 
   pre_tasks:
-    - name: Fail if DB IP is not provided
+    - name: Validate DB IP availability
       fail:
         msg: >
-          db_ip is not defined.
-          Run this job ONLY via the Workflow (DB → APP),
-          or provide db_ip_fallback via survey.
+          No DB IP provided.
+          Run via Workflow (DB → APP) or provide db_ip_fallback in survey.
       when: db_host is not defined
 
   tasks:
