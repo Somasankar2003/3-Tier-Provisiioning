@@ -21,6 +21,19 @@
     os_region_name: RegionOne
     os_interface: public
 
+    cloud_init: |
+      #cloud-config
+      disable_root: false
+      ssh_pwauth: true
+      chpasswd:
+        list: |
+          root:Stackmax
+        expire: false
+      runcmd:
+        - sed -i 's/^#\?PermitRootLogin .*/PermitRootLogin yes/' /etc/ssh/sshd_config
+        - sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+        - systemctl restart ssh || systemctl restart sshd
+
   tasks:
     - name: Create WEB VM
       openstack.cloud.server:
@@ -38,7 +51,7 @@
         flavor: "{{ vm_flavor }}"
         network: "{{ vm_net }}"
         key_name: "{{ vm_keypair }}"
-        userdata: "{{ hostvars['localhost']['cloud_init'] }}"
+        userdata: "{{ cloud_init }}"
         wait: yes
       register: web_vm
 
@@ -48,13 +61,14 @@
     - wait_for:
         host: "{{ web_ip }}"
         port: 22
-        delay: 30
+        delay: 40
         timeout: 600
 
     - add_host:
         name: "{{ web_ip }}"
         groups: web
-        ansible_user: ansible
+        ansible_user: root
+        ansible_password: StrongPasswordHere
 
 ###############################################################################
 # WEB TIER – NGINX
