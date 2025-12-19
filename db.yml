@@ -1,13 +1,13 @@
 ###############################################################################
-# DB TIER – VM CREATION
+# APP TIER – VM CREATION
 ###############################################################################
-- name: DB Tier - VM Creation
+- name: App Tier - VM Creation
   hosts: localhost
   connection: local
   gather_facts: no
 
   vars:
-    vm_flavor: "2C_4R_150"
+    vm_flavor: "cmp"
     vm_image: "a997754d-6cdf-4a21-8e52-5df389d3f7c5"
     vm_keypair: "k8s"
     vm_net: "cb24a95d-378a-470b-9647-4849caca9fb2"
@@ -17,7 +17,7 @@
     os_project_domain_id: "default"
     os_username: "admin"
     os_user_domain_name: "Default"
-    os_password: "bLEZFvatBShkvUZyKrasUjmNdTTc9c3HcxWykrro"
+    os_password: "{{ os_password }}"
     os_region_name: "RegionOne"
     os_interface: "public"
 
@@ -26,7 +26,6 @@
       users:
         - name: ansible
           sudo: ALL=(ALL) NOPASSWD:ALL
-          groups: sudo
           shell: /bin/bash
           ssh_authorized_keys:
             - {{ lookup('env','SSH_PUBLIC_KEY') }}
@@ -34,7 +33,7 @@
       disable_root: true
 
   tasks:
-    - name: Create DB VM with cloud-init
+    - name: Create App VM
       openstack.cloud.server:
         auth:
           auth_url: "{{ os_auth_url }}"
@@ -45,44 +44,97 @@
           user_domain_name: "{{ os_user_domain_name }}"
         region_name: "{{ os_region_name }}"
         interface: "{{ os_interface }}"
-        name: "{{ vm_name_db }}"
+        name: "{{ vm_name_app }}"
         image: "{{ vm_image }}"
         flavor: "{{ vm_flavor }}"
         key_name: "{{ vm_keypair }}"
         network: "{{ vm_net }}"
-        security_groups: [default]
         userdata: "{{ cloud_init }}"
+        security_groups: [default]
         wait: yes
-      register: db_vm
+      register: app_vm
 
-    - set_fact:
-        db_ip: >-
+    - name: Extract App private IP
+      set_fact:
+        app_ip: >-
           {{
-            db_vm.server.addresses
+            app_vm.server.addresses
             | dict2items | map(attribute='value') | first
             | selectattr('version','equalto',4)
             | map(attribute='addr') | first
           }}
 
-    - wait_for:
-        host: "{{ db_ip }}"
+    - name: Wait for SSH
+      wait_for:
+        host: "{{ app_ip }}"
         port: 22
         timeout: 300
 
-    - add_host:
-        name: "{{ db_ip }}"
-        groups: db
+    - name: Add App host
+      add_host:
+        name: "{{ app_ip }}"
+        groups: app
 
 ###############################################################################
-# DB CONFIG
+# APP TIER – APPLICATION SETUP (CONNECTED TO DB)
 ###############################################################################
-- name: DB Tier - MySQL Setup
-  hosts: db
+- name: App Tier - Application Setup
+  hosts: app
   become: yes
   gather_facts: yes
 
+  vars:
+    db_host: "{{ hostvars['localhost']['db_ip'] }}"
+    db_name: appdb
+    db_user: appuser
+    db_password: "App@123"
+
   tasks:
-    - apt:
-        name: mysql-server
+    - name: Install dependencies
+      apt:
+        name:
+          - python3
+          - python3-pip
         state: present
         update_cache: yes
+
+    - name: Install PyMySQL
+      pip:
+        name: pymysql
+
+    - name: Deploy application code
+      copy:
+        dest: /opt/app.py
+        mode: '0755'
+        content: |
+          import pymysql
+          from http.server import BaseHTTPRequestHandler, HTTPServer
+
+          def get_users():
+              conn = pymysql.connect(
+                  host="{{ db_host }}",
+                  user="{{ db_user }}",
+                  password="{{ db_password }}",
+                  database="{{ db_name }}"
+              )
+              cur = conn.cursor()
+              cur.execute("SELECT name FROM users")
+              data = cur.fetchall()
+              conn.close()
+              return data
+
+          class Handler(BaseHTTPRequestHandler):
+              def do_GET(self):
+                  users = get_users()
+                  self.send_response(200)
+                  self.send_header("Content-type","text/html")
+                  self.end_headers()
+                  self.wfile.write(b"<h1>Users from Database</h1>")
+                  for u in users:
+                      self.wfile.write(f"<p>{u[0]}</p>".encode())
+
+          HTTPServer(("",8080), Handler).serve_forever()
+
+    - name: Run application
+      shell: |
+        nohup python3 /opt/app.py > /var/log/app.log 2>&1 &
