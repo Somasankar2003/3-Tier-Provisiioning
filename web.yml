@@ -55,23 +55,26 @@
         wait: yes
       register: web_vm
 
-    - set_fact:
+    - name: Extract WEB IP
+      set_fact:
         web_ip: "{{ web_vm.server.addresses | dict2items | map(attribute='value') | first | selectattr('version','equalto',4) | map(attribute='addr') | first }}"
 
-    - wait_for:
+    - name: Wait for SSH
+      wait_for:
         host: "{{ web_ip }}"
         port: 22
         delay: 40
         timeout: 600
 
-    - add_host:
+    - name: Add WEB host
+      add_host:
         name: "{{ web_ip }}"
         groups: web
         ansible_user: root
         ansible_password: Stackmax
 
 ###############################################################################
-# WEB TIER – NGINX
+# WEB TIER – NGINX (FIXED)
 ###############################################################################
 - name: Web Tier - Nginx Setup
   hosts: web
@@ -79,7 +82,15 @@
   gather_facts: yes
 
   vars:
-    app_backend_ip: "{{ app_ip }}"
+    app_backend_ip: "{{ app_ip | default(omit) }}"
+
+  pre_tasks:
+    - name: Validate APP IP
+      fail:
+        msg: >
+          app_ip is not defined.
+          Run via workflow: DB → APP → WEB
+      when: app_backend_ip is not defined
 
   tasks:
     - name: Install nginx
@@ -88,12 +99,13 @@
         state: present
         update_cache: yes
 
-    - name: Configure nginx reverse proxy
+    - name: Configure nginx reverse proxy (APP)
       copy:
         dest: /etc/nginx/sites-available/default
         content: |
           server {
             listen 80;
+            server_name _;
 
             location / {
               proxy_pass http://{{ app_backend_ip }}:8080;
@@ -105,6 +117,11 @@
             }
           }
 
-    - name: Reload nginx
-      shell: |
-        nginx -t && systemctl reload nginx
+    - name: Test nginx configuration
+      command: nginx -t
+
+    - name: Restart nginx
+      service:
+        name: nginx
+        state: restarted
+        enabled: yes
