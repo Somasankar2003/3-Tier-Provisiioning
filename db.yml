@@ -53,36 +53,47 @@
   become: yes
 
   tasks:
-    - apt:
-        name: mysql-server
+    - name: Install MySQL server and client libs
+      apt:
+        name:
+          - mysql-server
+          - python3-pymysql
         state: present
         update_cache: yes
 
-    - lineinfile:
+    - name: Allow MySQL remote access
+      lineinfile:
         path: /etc/mysql/mysql.conf.d/mysqld.cnf
         regexp: '^bind-address'
         line: 'bind-address = 0.0.0.0'
 
-    - service:
+    - name: Restart MySQL
+      service:
         name: mysql
         state: restarted
         enabled: yes
 
-    - mysql_db:
+    - name: Create application database
+      community.mysql.mysql_db:
         name: appdb
         state: present
+        login_unix_socket: /var/run/mysqld/mysqld.sock
 
-    - mysql_user:
+    - name: Create application DB user
+      community.mysql.mysql_user:
         name: appuser
         password: App@123
         priv: "appdb.*:ALL"
         host: "%"
         state: present
+        login_unix_socket: /var/run/mysqld/mysqld.sock
 
-    - mysql_query:
+    - name: Create users table
+      community.mysql.mysql_query:
         db: appdb
         query: |
           CREATE TABLE IF NOT EXISTS users (
             id INT AUTO_INCREMENT PRIMARY KEY,
             name VARCHAR(50)
           );
+        login_unix_socket: /var/run/mysqld/mysqld.sock
