@@ -23,12 +23,6 @@
 
     cloud_init: |
       #cloud-config
-      users:
-        - default
-        - name: ansible
-          sudo: ALL=(ALL) NOPASSWD:ALL
-          shell: /bin/bash
-          groups: sudo
       disable_root: true
       ssh_pwauth: false
 
@@ -65,7 +59,7 @@
     - add_host:
         name: "{{ app_ip }}"
         groups: app
-        ansible_user: ansible
+        ansible_user: ubuntu
 
 ###############################################################################
 # APP TIER – APPLICATION
