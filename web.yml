@@ -21,6 +21,19 @@
     os_region_name: "RegionOne"
     os_interface: "public"
 
+    # 🔑 CLOUD-INIT (SSH FIX)
+    cloud_init: |
+      #cloud-config
+      users:
+        - name: ansible
+          sudo: ALL=(ALL) NOPASSWD:ALL
+          shell: /bin/bash
+          groups: sudo
+          ssh_authorized_keys:
+            - {{ lookup('env', 'SSH_PUBLIC_KEY') }}
+      ssh_pwauth: false
+      disable_root: true
+
   tasks:
     - debug:
         msg: "Web VM name is {{ vm_name_web }}"
@@ -42,11 +55,13 @@
         key_name: "{{ vm_keypair }}"
         network: "{{ vm_net }}"
         security_groups: [default]
+        userdata: "{{ cloud_init }}"
         wait: yes
         timeout: 600
       register: web_vm
 
-    - set_fact:
+    - name: Extract Web private IP
+      set_fact:
         web_ip: >-
           {{
             web_vm.server.addresses
@@ -58,18 +73,20 @@
             | first
           }}
 
-    - wait_for:
+    - name: Wait for SSH
+      wait_for:
         host: "{{ web_ip }}"
         port: 22
         delay: 20
         timeout: 300
 
-    - add_host:
+    - name: Add Web host
+      add_host:
         name: "{{ web_ip }}"
         groups: web
 
 ###############################################################################
-# WEB TIER – NGINX
+# WEB TIER – NGINX SETUP
 ###############################################################################
 - name: Web Tier - Nginx Setup
   hosts: web
@@ -80,12 +97,14 @@
     app_ip: "{{ hostvars['localhost']['app_ip'] }}"
 
   tasks:
-    - apt:
+    - name: Install Nginx
+      apt:
         name: nginx
         state: present
         update_cache: yes
 
-    - copy:
+    - name: Configure Nginx reverse proxy
+      copy:
         dest: /etc/nginx/sites-available/default
         content: |
           server {
@@ -95,7 +114,8 @@
               }
           }
 
-    - service:
+    - name: Restart Nginx
+      service:
         name: nginx
         state: restarted
         enabled: yes
