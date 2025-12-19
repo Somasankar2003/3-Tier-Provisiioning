@@ -1,0 +1,88 @@
+- name: DB Tier - VM Creation
+  hosts: localhost
+  connection: local
+  gather_facts: no
+
+  vars:
+    vm_flavor: "2C_4R_150"
+    vm_image: "a997754d-6cdf-4a21-8e52-5df389d3f7c5"
+    vm_keypair: "k8s"
+    vm_net: "cb24a95d-378a-470b-9647-4849caca9fb2"
+
+    os_auth_url: "http://192.168.170.50:5000"
+    os_project_name: "Production Engineering"
+    os_project_domain_id: "default"
+    os_username: "admin"
+    os_user_domain_name: "Default"
+    os_password: "bLEZFvatBShkvUZyKrasUjmNdTTc9c3HcxWykrro"
+    os_region_name: "RegionOne"
+    os_interface: "public"
+    os_identity_api_version: "3"
+
+  tasks:
+    - name: Create DB VM
+      openstack.cloud.server:
+        auth:
+          auth_url: "{{ os_auth_url }}"
+          username: "{{ os_username }}"
+          password: "{{ os_password }}"
+          project_name: "{{ os_project_name }}"
+          project_domain_id: "{{ os_project_domain_id }}"
+          user_domain_name: "{{ os_user_domain_name }}"
+        region_name: "{{ os_region_name }}"
+        interface: "{{ os_interface }}"
+        api_version: "{{ os_identity_api_version }}"
+        name: "{{ vm_name }}"
+        image: "{{ vm_image }}"
+        flavor: "{{ vm_flavor }}"
+        key_name: "{{ vm_keypair }}"
+        networks:
+          - uuid: "{{ vm_net }}"
+        wait: yes
+      register: db_vm
+
+    - set_fact:
+        db_ip: "{{ db_vm.server.public_v4 }}"
+
+    - add_host:
+        name: "{{ db_vm.server.public_v4 }}"
+        groups: db
+
+- name: DB Tier - MySQL Setup
+  hosts: db
+  become: yes
+
+  tasks:
+    - apt:
+        name: mysql-server
+        state: present
+        update_cache: yes
+
+    - lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^bind-address'
+        line: 'bind-address = 0.0.0.0'
+
+    - service:
+        name: mysql
+        state: restarted
+        enabled: yes
+
+    - mysql_db:
+        name: appdb
+        state: present
+
+    - mysql_user:
+        name: appuser
+        password: App@123
+        priv: "appdb.*:ALL"
+        host: "%"
+        state: present
+
+    - mysql_query:
+        db: appdb
+        query: |
+          CREATE TABLE IF NOT EXISTS users (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(50)
+          );
