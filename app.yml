@@ -17,21 +17,14 @@
     os_project_domain_id: "default"
     os_username: "admin"
     os_user_domain_name: "Default"
+    os_password: "bLEZFvatBShkvUZyKrasUjmNdTTc9c3HcxWykrro"
     os_region_name: "RegionOne"
     os_interface: "public"
 
-    cloud_init: |
-      #cloud-config
-      users:
-        - name: ansible
-          sudo: ALL=(ALL) NOPASSWD:ALL
-          shell: /bin/bash
-          ssh_authorized_keys:
-            - {{ lookup('env','SSH_PUBLIC_KEY') }}
-      ssh_pwauth: false
-      disable_root: true
-
   tasks:
+    - debug:
+        msg: "App VM name is {{ vm_name_app }}"
+
     - name: Create App VM
       openstack.cloud.server:
         auth:
@@ -48,23 +41,27 @@
         flavor: "{{ vm_flavor }}"
         key_name: "{{ vm_keypair }}"
         network: "{{ vm_net }}"
-        userdata: "{{ cloud_init }}"
         security_groups: [default]
         wait: yes
+        timeout: 600
       register: app_vm
 
     - set_fact:
         app_ip: >-
           {{
             app_vm.server.addresses
-            | dict2items | map(attribute='value') | first
+            | dict2items
+            | map(attribute='value')
+            | first
             | selectattr('version','equalto',4)
-            | map(attribute='addr') | first
+            | map(attribute='addr')
+            | first
           }}
 
     - wait_for:
         host: "{{ app_ip }}"
         port: 22
+        delay: 20
         timeout: 300
 
     - add_host:
@@ -74,7 +71,7 @@
 ###############################################################################
 # APP TIER – APPLICATION SETUP
 ###############################################################################
-- name: App Tier - Application Setup
+- name: App Tier - App Setup
   hosts: app
   become: yes
   gather_facts: yes
@@ -100,29 +97,25 @@
           import pymysql
           from http.server import BaseHTTPRequestHandler, HTTPServer
 
-          def fetch_users():
-              conn = pymysql.connect(
-                  host="{{ db_host }}",
-                  user="appuser",
-                  password="App@123",
-                  database="appdb"
-              )
-              cur = conn.cursor()
-              cur.execute("SELECT name FROM users")
-              data = cur.fetchall()
-              conn.close()
-              return data
+          conn = pymysql.connect(
+              host="{{ db_host }}",
+              user="appuser",
+              password="App@123",
+              database="appdb"
+          )
 
           class Handler(BaseHTTPRequestHandler):
               def do_GET(self):
-                  users = fetch_users()
+                  cur = conn.cursor()
+                  cur.execute("SELECT name FROM users")
+                  rows = cur.fetchall()
                   self.send_response(200)
                   self.send_header("Content-type","text/html")
                   self.end_headers()
                   self.wfile.write(b"<h1>Users</h1>")
-                  for u in users:
-                      self.wfile.write(f"<p>{u[0]}</p>".encode())
+                  for r in rows:
+                      self.wfile.write(f"<p>{r[0]}</p>".encode())
 
-          HTTPServer(("",8080), Handler).serve_forever()
+          HTTPServer(("",8080),Handler).serve_forever()
 
     - shell: nohup python3 /opt/app.py &
