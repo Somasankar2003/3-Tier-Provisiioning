@@ -19,14 +19,13 @@
     os_user_domain_name: "Default"
     os_password: "bLEZFvatBShkvUZyKrasUjmNdTTc9c3HcxWykrro"
     os_region_name: "RegionOne"
-    os_interface: "public"
+    os_interface: "internal"
 
   tasks:
-    - name: Verify DB VM name
-      debug:
-        msg: "DB VM name is {{ vm_name_db }}"
+    - debug:
+        msg: "Creating DB VM with name {{ vm_name_db }}"
 
-    - name: Create DB VM
+    - name: Create DB VM (boot from volume)
       openstack.cloud.server:
         auth:
           auth_url: "{{ os_auth_url }}"
@@ -38,25 +37,26 @@
         region_name: "{{ os_region_name }}"
         interface: "{{ os_interface }}"
         name: "{{ vm_name_db }}"
-        image: "{{ vm_image }}"
         flavor: "{{ vm_flavor }}"
+        image: "{{ vm_image }}"
         key_name: "{{ vm_keypair }}"
         network: "{{ vm_net }}"
+        boot_from_volume: true
+        volume_size: 50
+        terminate_volume: true
         wait: yes
         timeout: 600
       register: db_vm
 
-    - name: Save DB IP
-      set_fact:
+    - set_fact:
         db_ip: "{{ db_vm.server.public_v4 }}"
 
-    - name: Add DB VM to inventory
-      add_host:
+    - add_host:
         name: "{{ db_vm.server.public_v4 }}"
         groups: db
 
 ###############################################################################
-# DB TIER – MYSQL SETUP
+# DB TIER – MYSQL CONFIGURATION
 ###############################################################################
 - name: DB Tier - MySQL Setup
   hosts: db
@@ -69,38 +69,31 @@
     db_password: "App@123"
 
   tasks:
-    - name: Install MySQL Server
-      apt:
+    - apt:
         name: mysql-server
         state: present
         update_cache: yes
 
-    - name: Allow MySQL remote connections
-      lineinfile:
+    - lineinfile:
         path: /etc/mysql/mysql.conf.d/mysqld.cnf
         regexp: '^bind-address'
         line: 'bind-address = 0.0.0.0'
-        backup: yes
 
-    - name: Restart MySQL
-      service:
+    - service:
         name: mysql
         state: restarted
         enabled: yes
 
-    - name: Create database
-      shell: mysql --protocol=socket -e "CREATE DATABASE IF NOT EXISTS {{ db_name }};"
+    - shell: mysql --protocol=socket -e "CREATE DATABASE IF NOT EXISTS {{ db_name }};"
 
-    - name: Create DB user and grant privileges
-      shell: |
+    - shell: |
         mysql --protocol=socket -e "
         CREATE USER IF NOT EXISTS '{{ db_user }}'@'%' IDENTIFIED BY '{{ db_password }}';
         GRANT ALL PRIVILEGES ON {{ db_name }}.* TO '{{ db_user }}'@'%';
         FLUSH PRIVILEGES;
         "
 
-    - name: Create users table
-      shell: |
+    - shell: |
         mysql --protocol=socket {{ db_name }} -e "
         CREATE TABLE IF NOT EXISTS users (
           id INT AUTO_INCREMENT PRIMARY KEY,
