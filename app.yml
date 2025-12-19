@@ -82,7 +82,7 @@
 - name: App Tier - App Setup
   hosts: app
   become: yes
-  gather_facts: yes
+  gather_facts: no   # ✅ ONLY CHANGE DONE HERE
 
   vars:
     db_host: "{{ db_ip | default(db_ip_fallback | default(omit), true) }}"
