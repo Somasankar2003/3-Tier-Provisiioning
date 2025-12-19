@@ -23,8 +23,14 @@
 
     cloud_init: |
       #cloud-config
-      disable_root: true
+      users:
+        - name: ansible
+          sudo: ALL=(ALL) NOPASSWD:ALL
+          shell: /bin/bash
+          ssh_authorized_keys:
+            - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC+/HZun5X1/zRdQO8n0ozpeuHOD8nU0vxEtCAPLa/eCMphjnAR3oV9wNCkfiBkrgPWEJrJITBs0BHwYXm8R125AjYhUWUL6od354j73F05mjesl2EY4xD6MAGEtq/iS6HhyNGWgGFnJxNcxK1xA985IM4ESg65NE8L0J6s6eQYYCY6gA5BruvJZZR/q6plCy5aMm6JtEVQfOq4ZuAAeVzytlfKofYueDhn8TseqZbvA+v4EYY5KQPEjxPvxejxtnhxICAk1cWtOmDsIOTZXuW5wK16hnbo9rMuz8D1WzAw1YRt8lRVTG6jIfuayZyUab+31gnbJb2S7zHeDOlp8NvR Generated-by-Nova
       ssh_pwauth: false
+      disable_root: false
 
   tasks:
     - name: Create Web VM
@@ -59,7 +65,7 @@
     - add_host:
         name: "{{ web_ip }}"
         groups: web
-        ansible_user: ubuntu
+        ansible_user: ansible
 
 ###############################################################################
 # WEB TIER – NGINX
