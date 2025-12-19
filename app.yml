@@ -1,4 +1,4 @@
-- name: App Tier - VM Creation and App Setup
+- name: APP Tier - VM Creation
   hosts: localhost
   connection: local
   gather_facts: no
@@ -32,7 +32,6 @@
         region_name: "{{ os_region_name }}"
         interface: "{{ os_interface }}"
         api_version: "{{ os_identity_api_version }}"
-
         name: "{{ vm_name }}"
         image: "{{ vm_image }}"
         flavor: "{{ vm_flavor }}"
@@ -42,28 +41,56 @@
         wait: yes
       register: app_vm
 
-    - name: Add App VM to inventory
-      add_host:
+    - set_fact:
+        app_ip: "{{ app_vm.server.public_v4 }}"
+
+    - add_host:
         name: "{{ app_vm.server.public_v4 }}"
         groups: app
 
-- name: Configure App Tier (Hello World App)
+- name: APP Tier - Application Setup
   hosts: app
   become: yes
 
+  vars:
+    db_ip: "{{ hostvars['localhost']['db_ip'] | default('DB_IP_PLACEHOLDER') }}"
+
   tasks:
-    - name: Install Python
-      apt:
-        name: python3
+    - apt:
+        name:
+          - python3
+          - python3-pip
         state: present
         update_cache: yes
 
-    - name: Create Hello World app
-      copy:
+    - pip:
+        name: pymysql
+
+    - copy:
         dest: /opt/app.py
         content: |
-          from http.server import SimpleHTTPRequestHandler, HTTPServer
-          HTTPServer(("", 8080), SimpleHTTPRequestHandler).serve_forever()
+          import pymysql
+          from http.server import BaseHTTPRequestHandler, HTTPServer
 
-    - name: Run App
-      shell: nohup python3 /opt/app.py &
+          conn = pymysql.connect(
+              host="{{ db_ip }}",
+              user="appuser",
+              password="App@123",
+              database="appdb"
+          )
+
+          class Handler(BaseHTTPRequestHandler):
+              def do_GET(self):
+                  cur = conn.cursor()
+                  cur.execute("SELECT name FROM users")
+                  users = cur.fetchall()
+                  self.send_response(200)
+                  self.send_header("Content-type", "text/html")
+                  self.end_headers()
+                  self.wfile.write(b"<h1>Users</h1>")
+                  for u in users:
+                      self.wfile.write(f"<p>{u[0]}</p>".encode())
+
+          HTTPServer(("", 8080), Handler).serve_forever()
+
+    - shell: nohup python3 /opt/app.py &
