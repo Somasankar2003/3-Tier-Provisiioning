@@ -1,12 +1,14 @@
-- name: DB Tier
+###############################################################################
+# APP TIER – VM CREATION
+###############################################################################
+- name: App Tier - VM Creation
   hosts: localhost
   connection: local
   gather_facts: no
 
   vars:
-    vm_name_db: "{{ vm_name_db }}"
     vm_image: a997754d-6cdf-4a21-8e52-5df389d3f7c5
-    vm_flavor: 2C_4R_150
+    vm_flavor: cmp
     vm_net: cb24a95d-378a-470b-9647-4849caca9fb2
     vm_keypair: k1s
 
@@ -19,17 +21,8 @@
     os_region_name: RegionOne
     os_interface: public
 
-    cloud_init: |
-      #cloud-config
-      users:
-        - name: ansible
-          sudo: ALL=(ALL) NOPASSWD:ALL
-          shell: /bin/bash
-          ssh_authorized_keys:
-            - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCYTFyfBYWqV9TOFeKODgLfgFuCd8redSgZpRcMTPAtT57H4SlvI7oLzQKqDnzknrKh1hFL4YglwhXEdedvqAbhm5lE5z8HUj1bO1BsLJ1OtJSD/55olZe7yxJn4dE0GM AQ9+S5Mdp rcItVQ9RGAzj74rajUA/BtufOwra2XBUZbEA6G9qNuYqGLVl4KVmN7opaTWzeto v7h9dIaxE8fn7LoE5VPOE2kT/fU5l/bhIFnD/vYhVzXP Hxryrnkx2iUBH3vubsXdF3L2vqOFmV5fpOqXOPvEgeattkM0EXa5IliEmwauVuLH5/69KfPatXbKsnY+sC83+yvQiQHjxgCanCc
-
   tasks:
-    - name: Create DB VM
+    - name: Create APP VM
       openstack.cloud.server:
         auth:
           auth_url: "{{ os_auth_url }}"
@@ -40,38 +33,77 @@
           user_domain_name: "{{ os_user_domain_name }}"
         region_name: "{{ os_region_name }}"
         interface: "{{ os_interface }}"
-        name: "{{ vm_name_db }}"
+        name: "{{ vm_name_app }}"
         image: "{{ vm_image }}"
         flavor: "{{ vm_flavor }}"
         network: "{{ vm_net }}"
         key_name: "{{ vm_keypair }}"
-        userdata: "{{ cloud_init }}"
+        userdata: "{{ hostvars['localhost']['cloud_init'] }}"
         wait: yes
-      register: db_vm
+      register: app_vm
 
     - set_fact:
-        db_ip: "{{ db_vm.server.addresses | dict2items | map(attribute='value') | first | selectattr('version','equalto',4) | map(attribute='addr') | first }}"
+        app_ip: "{{ app_vm.server.addresses | dict2items | map(attribute='value') | first | selectattr('version','equalto',4) | map(attribute='addr') | first }}"
+
+    - wait_for:
+        host: "{{ app_ip }}"
+        port: 22
+        delay: 30
+        timeout: 600
 
     - add_host:
-        name: "{{ db_ip }}"
-        groups: db
+        name: "{{ app_ip }}"
+        groups: app
         ansible_user: ansible
 
-- name: Configure MySQL
-  hosts: db
+###############################################################################
+# APP TIER – APPLICATION
+###############################################################################
+- name: App Tier - App Setup
+  hosts: app
   become: yes
+  gather_facts: yes
+
+  vars:
+    db_host: "{{ hostvars['localhost']['db_ip'] }}"
 
   tasks:
     - apt:
-        name: mysql-server
+        name: [python3, python3-pip]
         state: present
         update_cache: yes
 
-    - shell: |
-        mysql -e "
-        CREATE DATABASE IF NOT EXISTS appdb;
-        CREATE USER IF NOT EXISTS 'appuser'@'%' IDENTIFIED BY 'App@123';
-        GRANT ALL PRIVILEGES ON appdb.* TO 'appuser'@'%';
-        FLUSH PRIVILEGES;
-        CREATE TABLE IF NOT EXISTS appdb.users (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(50));
-        "
+    - pip:
+        name: pymysql
+
+    - copy:
+        dest: /opt/app.py
+        mode: '0755'
+        content: |
+          import pymysql
+          from http.server import BaseHTTPRequestHandler, HTTPServer
+
+          def get_users():
+              conn = pymysql.connect(
+                  host="{{ db_host }}",
+                  user="appuser",
+                  password="App@123",
+                  database="appdb"
+              )
+              cur = conn.cursor()
+              cur.execute("SELECT name FROM users")
+              rows = cur.fetchall()
+              conn.close()
+              return rows
+
+          class Handler(BaseHTTPRequestHandler):
+              def do_GET(self):
+                  users = get_users()
+                  self.send_response(200)
+                  self.end_headers()
+                  for u in users:
+                      self.wfile.write(f"{u[0]}<br>".encode())
+
+          HTTPServer(("",8080),Handler).serve_forever()
+
+    - shell: nohup python3 /opt/app.py &
