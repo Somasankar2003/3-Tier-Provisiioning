@@ -12,20 +12,21 @@
     vm_keypair: "k8s"
     vm_net: "cb24a95d-378a-470b-9647-4849caca9fb2"
 
-    os_auth_url: "http://192.168.170.51:5000"
+    os_auth_url: "http://192.168.170.50:5000"
     os_project_name: "Production Engineering"
     os_project_domain_id: "default"
     os_username: "admin"
     os_user_domain_name: "Default"
     os_password: "bLEZFvatBShkvUZyKrasUjmNdTTc9c3HcxWykrro"
     os_region_name: "RegionOne"
-    os_interface: "internal"
+    os_interface: "public"
 
   tasks:
-    - debug:
-        msg: "Creating App VM with name {{ vm_name_app }}"
+    - name: Verify App VM name
+      debug:
+        msg: "App VM name is {{ vm_name_app }}"
 
-    - name: Create App VM (boot from volume)
+    - name: Create App VM
       openstack.cloud.server:
         auth:
           auth_url: "{{ os_auth_url }}"
@@ -37,21 +38,20 @@
         region_name: "{{ os_region_name }}"
         interface: "{{ os_interface }}"
         name: "{{ vm_name_app }}"
-        flavor: "{{ vm_flavor }}"
         image: "{{ vm_image }}"
+        flavor: "{{ vm_flavor }}"
         key_name: "{{ vm_keypair }}"
         network: "{{ vm_net }}"
-        boot_from_volume: true
-        volume_size: 30
-        terminate_volume: true
         wait: yes
         timeout: 600
       register: app_vm
 
-    - set_fact:
+    - name: Save App IP
+      set_fact:
         app_ip: "{{ app_vm.server.public_v4 }}"
 
-    - add_host:
+    - name: Add App VM to inventory
+      add_host:
         name: "{{ app_vm.server.public_v4 }}"
         groups: app
 
@@ -70,17 +70,20 @@
     db_password: "App@123"
 
   tasks:
-    - apt:
+    - name: Install required packages
+      apt:
         name:
           - python3
           - python3-pip
         state: present
         update_cache: yes
 
-    - pip:
+    - name: Install PyMySQL
+      pip:
         name: pymysql
 
-    - copy:
+    - name: Create app code
+      copy:
         dest: /opt/app.py
         mode: '0755'
         content: |
@@ -102,10 +105,11 @@
                   self.send_response(200)
                   self.send_header("Content-type", "text/html")
                   self.end_headers()
-                  self.wfile.write(b"<h1>Users</h1>")
+                  self.wfile.write(b"<h1>Users from MySQL</h1>")
                   for r in rows:
                       self.wfile.write(f"<p>{r[0]}</p>".encode())
 
           HTTPServer(("", 8080), Handler).serve_forever()
 
-    - shell: nohup python3 /opt/app.py &
+    - name: Start application
+      shell: nohup python3 /opt/app.py &
