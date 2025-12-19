@@ -1,10 +1,12 @@
-- name: Web Tier
+###############################################################################
+# WEB TIER – VM CREATION
+###############################################################################
+- name: Web Tier - VM Creation
   hosts: localhost
   connection: local
   gather_facts: no
 
   vars:
-    vm_name_web: "{{ vm_name_web }}"
     vm_image: a997754d-6cdf-4a21-8e52-5df389d3f7c5
     vm_flavor: cmp
     vm_net: cb24a95d-378a-470b-9647-4849caca9fb2
@@ -43,14 +45,27 @@
     - set_fact:
         web_ip: "{{ web_vm.server.addresses | dict2items | map(attribute='value') | first | selectattr('version','equalto',4) | map(attribute='addr') | first }}"
 
+    - wait_for:
+        host: "{{ web_ip }}"
+        port: 22
+        delay: 30
+        timeout: 600
+
     - add_host:
         name: "{{ web_ip }}"
         groups: web
         ansible_user: ansible
 
-- name: Nginx
+###############################################################################
+# WEB TIER – NGINX
+###############################################################################
+- name: Web Tier - Nginx Setup
   hosts: web
   become: yes
+  gather_facts: yes
+
+  vars:
+    app_ip: "{{ hostvars['localhost']['app_ip'] }}"
 
   tasks:
     - apt:
@@ -64,7 +79,7 @@
           server {
             listen 80;
             location / {
-              proxy_pass http://{{ hostvars['localhost']['app_ip'] }}:8080;
+              proxy_pass http://{{ app_ip }}:8080;
             }
           }
 
