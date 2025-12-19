@@ -20,10 +20,9 @@
     os_password: "bLEZFvatBShkvUZyKrasUjmNdTTc9c3HcxWykrro"
     os_region_name: "RegionOne"
     os_interface: "public"
-    os_identity_api_version: "3"
 
   tasks:
-    - name: Verify DB VM name from survey
+    - name: Verify DB VM name
       debug:
         msg: "DB VM name is {{ vm_name_db }}"
 
@@ -38,14 +37,11 @@
           user_domain_name: "{{ os_user_domain_name }}"
         region_name: "{{ os_region_name }}"
         interface: "{{ os_interface }}"
-        api_version: "{{ os_identity_api_version }}"
-
         name: "{{ vm_name_db }}"
         image: "{{ vm_image }}"
         flavor: "{{ vm_flavor }}"
         key_name: "{{ vm_keypair }}"
-        networks:
-          - uuid: "{{ vm_net }}"
+        network: "{{ vm_net }}"
         wait: yes
         timeout: 600
       register: db_vm
@@ -60,7 +56,7 @@
         groups: db
 
 ###############################################################################
-# DB TIER – MYSQL CONFIGURATION
+# DB TIER – MYSQL SETUP
 ###############################################################################
 - name: DB Tier - MySQL Setup
   hosts: db
@@ -92,21 +88,16 @@
         state: restarted
         enabled: yes
 
-    - name: Create application database
-      shell: |
-        mysql --protocol=socket -e "CREATE DATABASE IF NOT EXISTS {{ db_name }};"
-      args:
-        executable: /bin/bash
+    - name: Create database
+      shell: mysql --protocol=socket -e "CREATE DATABASE IF NOT EXISTS {{ db_name }};"
 
-    - name: Create application DB user and grant privileges
+    - name: Create DB user and grant privileges
       shell: |
         mysql --protocol=socket -e "
         CREATE USER IF NOT EXISTS '{{ db_user }}'@'%' IDENTIFIED BY '{{ db_password }}';
         GRANT ALL PRIVILEGES ON {{ db_name }}.* TO '{{ db_user }}'@'%';
         FLUSH PRIVILEGES;
         "
-      args:
-        executable: /bin/bash
 
     - name: Create users table
       shell: |
@@ -116,5 +107,3 @@
           name VARCHAR(50)
         );
         "
-      args:
-        executable: /bin/bash
