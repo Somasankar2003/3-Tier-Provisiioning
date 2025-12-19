@@ -55,23 +55,31 @@
         wait: yes
       register: db_vm
 
-    - set_fact:
+    - name: Extract DB IP
+      set_fact:
         db_ip: "{{ db_vm.server.addresses | dict2items | map(attribute='value') | first | selectattr('version','equalto',4) | map(attribute='addr') | first }}"
 
-    - wait_for:
+    - name: Expose DB IP to workflow
+      set_stats:
+        data:
+          db_ip: "{{ db_ip }}"
+
+    - name: Wait for SSH on DB VM
+      wait_for:
         host: "{{ db_ip }}"
         port: 22
         delay: 40
         timeout: 600
 
-    - add_host:
+    - name: Add DB host
+      add_host:
         name: "{{ db_ip }}"
         groups: db
         ansible_user: root
         ansible_password: Stackmax
 
 ###############################################################################
-# DB TIER – MYSQL SETUP (FIXED)
+# DB TIER – MYSQL SETUP (FIXED & FINAL)
 ###############################################################################
 - name: DB Tier - MySQL Setup
   hosts: db
@@ -79,21 +87,25 @@
   gather_facts: yes
 
   tasks:
-    - name: Install MySQL
+    - name: Install MySQL Server
       apt:
         name: mysql-server
         state: present
         update_cache: yes
 
-    # ✅ CRITICAL FIX
     - name: Allow MySQL remote connections
       lineinfile:
         path: /etc/mysql/mysql.conf.d/mysqld.cnf
         regexp: '^bind-address'
         line: 'bind-address = 0.0.0.0'
-      notify: Restart MySQL
 
-    - name: Create database and user
+    - name: Restart MySQL
+      service:
+        name: mysql
+        state: restarted
+        enabled: yes
+
+    - name: Create database, user, and table
       shell: |
         mysql -e "
         CREATE DATABASE IF NOT EXISTS appdb;
@@ -105,11 +117,3 @@
           name VARCHAR(50)
         );
         "
-      args:
-        executable: /bin/bash
-
-  handlers:
-    - name: Restart MySQL
-      service:
-        name: mysql
-        state: restarted
