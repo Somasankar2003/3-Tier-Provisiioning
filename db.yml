@@ -7,11 +7,13 @@
   gather_facts: no
 
   vars:
+    # VM details
     vm_flavor: "2C_4R_150"
     vm_image: "a997754d-6cdf-4a21-8e52-5df389d3f7c5"
     vm_keypair: "k8s"
     vm_net: "cb24a95d-378a-470b-9647-4849caca9fb2"
 
+    # OpenStack auth
     os_auth_url: "http://192.168.170.50:5000"
     os_project_name: "Production Engineering"
     os_project_domain_id: "default"
@@ -22,11 +24,11 @@
     os_interface: "public"
 
   tasks:
-    - name: Verify DB VM name
+    - name: Verify DB VM name from workflow survey
       debug:
         msg: "DB VM name is {{ vm_name_db }}"
 
-    - name: Create DB VM
+    - name: Create DB VM (boot from image)
       openstack.cloud.server:
         auth:
           auth_url: "{{ os_auth_url }}"
@@ -37,6 +39,7 @@
           user_domain_name: "{{ os_user_domain_name }}"
         region_name: "{{ os_region_name }}"
         interface: "{{ os_interface }}"
+
         name: "{{ vm_name_db }}"
         image: "{{ vm_image }}"
         flavor: "{{ vm_flavor }}"
@@ -46,17 +49,36 @@
         timeout: 600
       register: db_vm
 
-    - name: Save DB IP
+    - name: Get network name from network ID
+      openstack.cloud.network_info:
+        auth:
+          auth_url: "{{ os_auth_url }}"
+          username: "{{ os_username }}"
+          password: "{{ os_password }}"
+          project_name: "{{ os_project_name }}"
+          project_domain_id: "{{ os_project_domain_id }}"
+          user_domain_name: "{{ os_user_domain_name }}"
+        region_name: "{{ os_region_name }}"
+        interface: "{{ os_interface }}"
+        filters:
+          id: "{{ vm_net }}"
+      register: net_info
+
+    - name: Save DB private IP
       set_fact:
-        db_ip: "{{ db_vm.server.public_v4 }}"
+        db_ip: "{{ db_vm.server.addresses[net_info.networks[0].name][0].addr }}"
+
+    - name: Show DB IP (debug)
+      debug:
+        msg: "DB private IP is {{ db_ip }}"
 
     - name: Add DB VM to inventory
       add_host:
-        name: "{{ db_vm.server.public_v4 }}"
+        name: "{{ db_ip }}"
         groups: db
 
 ###############################################################################
-# DB TIER – MYSQL SETUP
+# DB TIER – MYSQL CONFIGURATION
 ###############################################################################
 - name: DB Tier - MySQL Setup
   hosts: db
@@ -88,7 +110,7 @@
         state: restarted
         enabled: yes
 
-    - name: Create database
+    - name: Create application database
       shell: mysql --protocol=socket -e "CREATE DATABASE IF NOT EXISTS {{ db_name }};"
 
     - name: Create DB user and grant privileges
