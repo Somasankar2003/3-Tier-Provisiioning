@@ -7,11 +7,13 @@
   gather_facts: no
 
   vars:
+    # VM details
     vm_flavor: "2C_4R_150"
     vm_image: "a997754d-6cdf-4a21-8e52-5df389d3f7c5"
     vm_keypair: "k8s"
     vm_net: "cb24a95d-378a-470b-9647-4849caca9fb2"
 
+    # OpenStack auth
     os_auth_url: "http://192.168.170.50:5000"
     os_project_name: "Production Engineering"
     os_project_domain_id: "default"
@@ -37,16 +39,19 @@
           user_domain_name: "{{ os_user_domain_name }}"
         region_name: "{{ os_region_name }}"
         interface: "{{ os_interface }}"
+
         name: "{{ vm_name_db }}"
         image: "{{ vm_image }}"
         flavor: "{{ vm_flavor }}"
         key_name: "{{ vm_keypair }}"
         network: "{{ vm_net }}"
+        security_groups:
+          - default
         wait: yes
         timeout: 600
       register: db_vm
 
-    - name: Save DB private IP (generic & safe)
+    - name: Extract DB private IP (generic & safe)
       set_fact:
         db_ip: >-
           {{
@@ -59,14 +64,22 @@
             | first
           }}
 
-    - name: Show DB IP
+    - name: Show DB private IP
       debug:
         msg: "DB private IP is {{ db_ip }}"
+
+    - name: Wait for SSH to be available on DB VM
+      wait_for:
+        host: "{{ db_ip }}"
+        port: 22
+        delay: 20
+        timeout: 300
 
     - name: Add DB VM to inventory
       add_host:
         name: "{{ db_ip }}"
         groups: db
+        ansible_user: ubuntu
 
 ###############################################################################
 # DB TIER – MYSQL CONFIGURATION
