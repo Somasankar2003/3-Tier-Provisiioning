@@ -144,7 +144,7 @@
 
           HTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
 
-    - name: Restart application safely
+    - name: Start application
       shell: |
-        pkill -f app.py || true
         nohup python3 /opt/app.py > /var/log/app.log 2>&1 &
+
