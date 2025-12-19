@@ -1,4 +1,4 @@
-- name: Web Tier - VM Creation and Nginx Setup
+- name: WEB Tier - VM Creation
   hosts: localhost
   connection: local
   gather_facts: no
@@ -32,7 +32,6 @@
         region_name: "{{ os_region_name }}"
         interface: "{{ os_interface }}"
         api_version: "{{ os_identity_api_version }}"
-
         name: "{{ vm_name }}"
         image: "{{ vm_image }}"
         flavor: "{{ vm_flavor }}"
@@ -42,29 +41,34 @@
         wait: yes
       register: web_vm
 
-    - name: Add Web VM to inventory
-      add_host:
+    - add_host:
         name: "{{ web_vm.server.public_v4 }}"
         groups: web
 
-- name: Configure Web Tier (Nginx)
+- name: WEB Tier - Nginx Setup
   hosts: web
   become: yes
 
+  vars:
+    app_ip: "{{ hostvars['localhost']['app_ip'] | default('APP_IP_PLACEHOLDER') }}"
+
   tasks:
-    - name: Install Nginx
-      apt:
+    - apt:
         name: nginx
         state: present
         update_cache: yes
 
-    - name: Create index page
-      copy:
-        dest: /var/www/html/index.html
-        content: "<h1>Hello World from Web Tier (Nginx)</h1>"
+    - copy:
+        dest: /etc/nginx/sites-available/default
+        content: |
+          server {
+              listen 80;
+              location / {
+                  proxy_pass http://{{ app_ip }}:8080;
+              }
+          }
 
-    - name: Start Nginx
-      service:
+    - service:
         name: nginx
-        state: started
+        state: restarted
         enabled: yes
