@@ -17,21 +17,14 @@
     os_project_domain_id: "default"
     os_username: "admin"
     os_user_domain_name: "Default"
+    os_password: "bLEZFvatBShkvUZyKrasUjmNdTTc9c3HcxWykrro"
     os_region_name: "RegionOne"
     os_interface: "public"
 
-    cloud_init: |
-      #cloud-config
-      users:
-        - name: ansible
-          sudo: ALL=(ALL) NOPASSWD:ALL
-          shell: /bin/bash
-          ssh_authorized_keys:
-            - {{ lookup('env','SSH_PUBLIC_KEY') }}
-      ssh_pwauth: false
-      disable_root: true
-
   tasks:
+    - debug:
+        msg: "DB VM name is {{ vm_name_db }}"
+
     - name: Create DB VM
       openstack.cloud.server:
         auth:
@@ -48,26 +41,36 @@
         flavor: "{{ vm_flavor }}"
         key_name: "{{ vm_keypair }}"
         network: "{{ vm_net }}"
-        userdata: "{{ cloud_init }}"
         security_groups: [default]
         wait: yes
+        timeout: 600
       register: db_vm
 
-    - set_fact:
+    - name: Extract DB private IP
+      set_fact:
         db_ip: >-
           {{
             db_vm.server.addresses
-            | dict2items | map(attribute='value') | first
+            | dict2items
+            | map(attribute='value')
+            | first
             | selectattr('version','equalto',4)
-            | map(attribute='addr') | first
+            | map(attribute='addr')
+            | first
           }}
 
-    - wait_for:
+    - debug:
+        msg: "DB private IP is {{ db_ip }}"
+
+    - name: Wait for SSH
+      wait_for:
         host: "{{ db_ip }}"
         port: 22
+        delay: 20
         timeout: 300
 
-    - add_host:
+    - name: Add DB host
+      add_host:
         name: "{{ db_ip }}"
         groups: db
 
@@ -78,6 +81,11 @@
   hosts: db
   become: yes
   gather_facts: yes
+
+  vars:
+    db_name: appdb
+    db_user: appuser
+    db_password: "App@123"
 
   tasks:
     - apt:
@@ -95,13 +103,18 @@
         state: restarted
         enabled: yes
 
+    - shell: mysql --protocol=socket -e "CREATE DATABASE IF NOT EXISTS {{ db_name }};"
+
     - shell: |
         mysql --protocol=socket -e "
-        CREATE DATABASE IF NOT EXISTS appdb;
-        CREATE USER IF NOT EXISTS 'appuser'@'%' IDENTIFIED BY 'App@123';
-        GRANT ALL PRIVILEGES ON appdb.* TO 'appuser'@'%';
+        CREATE USER IF NOT EXISTS '{{ db_user }}'@'%' IDENTIFIED BY '{{ db_password }}';
+        GRANT ALL PRIVILEGES ON {{ db_name }}.* TO '{{ db_user }}'@'%';
         FLUSH PRIVILEGES;
-        CREATE TABLE IF NOT EXISTS appdb.users (
+        "
+
+    - shell: |
+        mysql --protocol=socket {{ db_name }} -e "
+        CREATE TABLE IF NOT EXISTS users (
           id INT AUTO_INCREMENT PRIMARY KEY,
           name VARCHAR(50)
         );
