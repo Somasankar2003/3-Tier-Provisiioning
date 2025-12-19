@@ -1,10 +1,12 @@
-- name: DB Tier
+###############################################################################
+# DB TIER – VM CREATION
+###############################################################################
+- name: DB Tier - VM Creation
   hosts: localhost
   connection: local
   gather_facts: no
 
   vars:
-    vm_name_db: "{{ vm_name_db }}"
     vm_image: a997754d-6cdf-4a21-8e52-5df389d3f7c5
     vm_flavor: 2C_4R_150
     vm_net: cb24a95d-378a-470b-9647-4849caca9fb2
@@ -26,7 +28,12 @@
           sudo: ALL=(ALL) NOPASSWD:ALL
           shell: /bin/bash
           ssh_authorized_keys:
-            - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCYTFyfBYWqV9TOFeKODgLfgFuCd8redSgZpRcMTPAtT57H4SlvI7oLzQKqDnzknrKh1hFL4YglwhXEdedvqAbhm5lE5z8HUj1bO1BsLJ1OtJSD/55olZe7yxJn4dE0GM AQ9+S5Mdp rcItVQ9RGAzj74rajUA/BtufOwra2XBUZbEA6G9qNuYqGLVl4KVmN7opaTWzeto v7h9dIaxE8fn7LoE5VPOE2kT/fU5l/bhIFnD/vYhVzXP Hxryrnkx2iUBH3vubsXdF3L2vqOFmV5fpOqXOPvEgeattkM0EXa5IliEmwauVuLH5/69KfPatXbKsnY+sC83+yvQiQHjxgCanCc
+            - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCYTFyfBYWqV9TOFeKODgLfgFuCd8redSgZpRcMTPAtT57H4SlvI7oLzQKqDnzknrKh1hFL4YglwhXEdedvqAbhm5lE5z8HUj1bO1BsLJ1OtJSD/55olZe7yxJn4dE0GMAQ9+S5Mdp rcItVQ9RGAzj74rajUA/BtufOwra2XBUZbEA6G9qNuYqGLVl4KVmN7opaTWzeto v7h9dIaxE8fn7LoE5VPOE2kT/fU5l/bhIFnD/vYhVzXP Hxryrnkx2iUBH3vubsXdF3L2vqOFmV5fpOqXOPvEgeattkM0EXa5IliEmwauVuLH5/69KfPatXbKsnY+sC83+yvQiQHjxgCanCc
+      ssh_pwauth: false
+      disable_root: false
+      runcmd:
+        - systemctl enable ssh || systemctl enable sshd
+        - systemctl restart ssh || systemctl restart sshd
 
   tasks:
     - name: Create DB VM
@@ -49,17 +56,29 @@
         wait: yes
       register: db_vm
 
-    - set_fact:
+    - name: Extract DB IP
+      set_fact:
         db_ip: "{{ db_vm.server.addresses | dict2items | map(attribute='value') | first | selectattr('version','equalto',4) | map(attribute='addr') | first }}"
+
+    - name: Wait for SSH (DB)
+      wait_for:
+        host: "{{ db_ip }}"
+        port: 22
+        delay: 30
+        timeout: 600
 
     - add_host:
         name: "{{ db_ip }}"
         groups: db
         ansible_user: ansible
 
-- name: Configure MySQL
+###############################################################################
+# DB TIER – MYSQL CONFIG
+###############################################################################
+- name: DB Tier - MySQL Setup
   hosts: db
   become: yes
+  gather_facts: yes
 
   tasks:
     - apt:
@@ -73,5 +92,8 @@
         CREATE USER IF NOT EXISTS 'appuser'@'%' IDENTIFIED BY 'App@123';
         GRANT ALL PRIVILEGES ON appdb.* TO 'appuser'@'%';
         FLUSH PRIVILEGES;
-        CREATE TABLE IF NOT EXISTS appdb.users (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(50));
+        CREATE TABLE IF NOT EXISTS appdb.users (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          name VARCHAR(50)
+        );
         "
