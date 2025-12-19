@@ -21,23 +21,18 @@
     os_region_name: "RegionOne"
     os_interface: "public"
 
-    # 🔑 CLOUD-INIT (SSH FIX)
     cloud_init: |
       #cloud-config
       users:
+        - default
         - name: ansible
           sudo: ALL=(ALL) NOPASSWD:ALL
           shell: /bin/bash
           groups: sudo
-          ssh_authorized_keys:
-            - {{ lookup('env', 'SSH_PUBLIC_KEY') }}
-      ssh_pwauth: false
       disable_root: true
+      ssh_pwauth: false
 
   tasks:
-    - debug:
-        msg: "App VM name is {{ vm_name_app }}"
-
     - name: Create App VM
       openstack.cloud.server:
         auth:
@@ -54,41 +49,28 @@
         flavor: "{{ vm_flavor }}"
         key_name: "{{ vm_keypair }}"
         network: "{{ vm_net }}"
-        security_groups: [default]
         userdata: "{{ cloud_init }}"
+        security_groups: [default]
         wait: yes
-        timeout: 600
       register: app_vm
 
-    - name: Extract App private IP
-      set_fact:
-        app_ip: >-
-          {{
-            app_vm.server.addresses
-            | dict2items
-            | map(attribute='value')
-            | first
-            | selectattr('version','equalto',4)
-            | map(attribute='addr')
-            | first
-          }}
+    - set_fact:
+        app_ip: "{{ app_vm.server.addresses | dict2items | map(attribute='value') | first | selectattr('version','equalto',4) | map(attribute='addr') | first }}"
 
-    - name: Wait for SSH
-      wait_for:
+    - wait_for:
         host: "{{ app_ip }}"
         port: 22
-        delay: 20
         timeout: 300
 
-    - name: Add App host
-      add_host:
+    - add_host:
         name: "{{ app_ip }}"
         groups: app
+        ansible_user: ansible
 
 ###############################################################################
-# APP TIER – APPLICATION SETUP
+# APP TIER – APPLICATION
 ###############################################################################
-- name: App Tier - App Setup
+- name: App Tier - Application Setup
   hosts: app
   become: yes
   gather_facts: yes
@@ -97,20 +79,15 @@
     db_host: "{{ hostvars['localhost']['db_ip'] }}"
 
   tasks:
-    - name: Install dependencies
-      apt:
-        name:
-          - python3
-          - python3-pip
+    - apt:
+        name: [python3, python3-pip]
         state: present
         update_cache: yes
 
-    - name: Install PyMySQL
-      pip:
+    - pip:
         name: pymysql
 
-    - name: Deploy application code
-      copy:
+    - copy:
         dest: /opt/app.py
         mode: '0755'
         content: |
@@ -126,22 +103,19 @@
               )
               cur = conn.cursor()
               cur.execute("SELECT name FROM users")
-              rows = cur.fetchall()
+              data = cur.fetchall()
               conn.close()
-              return rows
+              return data
 
           class Handler(BaseHTTPRequestHandler):
               def do_GET(self):
                   users = fetch_users()
                   self.send_response(200)
-                  self.send_header("Content-type", "text/html")
                   self.end_headers()
                   self.wfile.write(b"<h1>Users</h1>")
                   for u in users:
                       self.wfile.write(f"<p>{u[0]}</p>".encode())
 
-          HTTPServer(("", 8080), Handler).serve_forever()
+          HTTPServer(("",8080),Handler).serve_forever()
 
-    - name: Start application
-      shell: |
-        nohup python3 /opt/app.py > /var/log/app.log 2>&1 &
+    - shell: nohup python3 /opt/app.py &
