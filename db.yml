@@ -12,20 +12,21 @@
     vm_keypair: "k8s"
     vm_net: "cb24a95d-378a-470b-9647-4849caca9fb2"
 
-    os_auth_url: "http://192.168.170.51:5000"
+    os_auth_url: "http://192.168.170.50:5000"
     os_project_name: "Production Engineering"
     os_project_domain_id: "default"
     os_username: "admin"
     os_user_domain_name: "Default"
     os_password: "bLEZFvatBShkvUZyKrasUjmNdTTc9c3HcxWykrro"
     os_region_name: "RegionOne"
-    os_interface: "internal"
+    os_interface: "public"
 
   tasks:
-    - debug:
-        msg: "Creating DB VM with name {{ vm_name_db }}"
+    - name: Verify DB VM name
+      debug:
+        msg: "DB VM name is {{ vm_name_db }}"
 
-    - name: Create DB VM (boot from volume)
+    - name: Create DB VM
       openstack.cloud.server:
         auth:
           auth_url: "{{ os_auth_url }}"
@@ -37,26 +38,25 @@
         region_name: "{{ os_region_name }}"
         interface: "{{ os_interface }}"
         name: "{{ vm_name_db }}"
-        flavor: "{{ vm_flavor }}"
         image: "{{ vm_image }}"
+        flavor: "{{ vm_flavor }}"
         key_name: "{{ vm_keypair }}"
         network: "{{ vm_net }}"
-        boot_from_volume: true
-        volume_size: 50
-        terminate_volume: true
         wait: yes
         timeout: 600
       register: db_vm
 
-    - set_fact:
+    - name: Save DB IP
+      set_fact:
         db_ip: "{{ db_vm.server.public_v4 }}"
 
-    - add_host:
+    - name: Add DB VM to inventory
+      add_host:
         name: "{{ db_vm.server.public_v4 }}"
         groups: db
 
 ###############################################################################
-# DB TIER – MYSQL CONFIGURATION
+# DB TIER – MYSQL SETUP
 ###############################################################################
 - name: DB Tier - MySQL Setup
   hosts: db
@@ -69,31 +69,38 @@
     db_password: "App@123"
 
   tasks:
-    - apt:
+    - name: Install MySQL Server
+      apt:
         name: mysql-server
         state: present
         update_cache: yes
 
-    - lineinfile:
+    - name: Allow MySQL remote connections
+      lineinfile:
         path: /etc/mysql/mysql.conf.d/mysqld.cnf
         regexp: '^bind-address'
         line: 'bind-address = 0.0.0.0'
+        backup: yes
 
-    - service:
+    - name: Restart MySQL
+      service:
         name: mysql
         state: restarted
         enabled: yes
 
-    - shell: mysql --protocol=socket -e "CREATE DATABASE IF NOT EXISTS {{ db_name }};"
+    - name: Create database
+      shell: mysql --protocol=socket -e "CREATE DATABASE IF NOT EXISTS {{ db_name }};"
 
-    - shell: |
+    - name: Create DB user and grant privileges
+      shell: |
         mysql --protocol=socket -e "
         CREATE USER IF NOT EXISTS '{{ db_user }}'@'%' IDENTIFIED BY '{{ db_password }}';
         GRANT ALL PRIVILEGES ON {{ db_name }}.* TO '{{ db_user }}'@'%';
         FLUSH PRIVILEGES;
         "
 
-    - shell: |
+    - name: Create users table
+      shell: |
         mysql --protocol=socket {{ db_name }} -e "
         CREATE TABLE IF NOT EXISTS users (
           id INT AUTO_INCREMENT PRIMARY KEY,
