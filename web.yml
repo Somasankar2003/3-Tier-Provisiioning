@@ -20,10 +20,9 @@
     os_password: "bLEZFvatBShkvUZyKrasUjmNdTTc9c3HcxWykrro"
     os_region_name: "RegionOne"
     os_interface: "public"
-    os_identity_api_version: "3"
 
   tasks:
-    - name: Verify Web VM name from survey
+    - name: Verify Web VM name
       debug:
         msg: "Web VM name is {{ vm_name_web }}"
 
@@ -38,13 +37,11 @@
           user_domain_name: "{{ os_user_domain_name }}"
         region_name: "{{ os_region_name }}"
         interface: "{{ os_interface }}"
-        api_version: "{{ os_identity_api_version }}"
         name: "{{ vm_name_web }}"
         image: "{{ vm_image }}"
         flavor: "{{ vm_flavor }}"
         key_name: "{{ vm_keypair }}"
-        networks:
-          - uuid: "{{ vm_net }}"
+        network: "{{ vm_net }}"
         wait: yes
         timeout: 600
       register: web_vm
