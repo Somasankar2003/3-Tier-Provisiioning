@@ -21,23 +21,18 @@
     os_region_name: "RegionOne"
     os_interface: "public"
 
-    # 🔑 CLOUD-INIT (SSH FIX)
     cloud_init: |
       #cloud-config
       users:
+        - default
         - name: ansible
           sudo: ALL=(ALL) NOPASSWD:ALL
           shell: /bin/bash
           groups: sudo
-          ssh_authorized_keys:
-            - {{ lookup('env', 'SSH_PUBLIC_KEY') }}
-      ssh_pwauth: false
       disable_root: true
+      ssh_pwauth: false
 
   tasks:
-    - debug:
-        msg: "Web VM name is {{ vm_name_web }}"
-
     - name: Create Web VM
       openstack.cloud.server:
         auth:
@@ -54,39 +49,26 @@
         flavor: "{{ vm_flavor }}"
         key_name: "{{ vm_keypair }}"
         network: "{{ vm_net }}"
-        security_groups: [default]
         userdata: "{{ cloud_init }}"
+        security_groups: [default]
         wait: yes
-        timeout: 600
       register: web_vm
 
-    - name: Extract Web private IP
-      set_fact:
-        web_ip: >-
-          {{
-            web_vm.server.addresses
-            | dict2items
-            | map(attribute='value')
-            | first
-            | selectattr('version','equalto',4)
-            | map(attribute='addr')
-            | first
-          }}
+    - set_fact:
+        web_ip: "{{ web_vm.server.addresses | dict2items | map(attribute='value') | first | selectattr('version','equalto',4) | map(attribute='addr') | first }}"
 
-    - name: Wait for SSH
-      wait_for:
+    - wait_for:
         host: "{{ web_ip }}"
         port: 22
-        delay: 20
         timeout: 300
 
-    - name: Add Web host
-      add_host:
+    - add_host:
         name: "{{ web_ip }}"
         groups: web
+        ansible_user: ansible
 
 ###############################################################################
-# WEB TIER – NGINX SETUP
+# WEB TIER – NGINX
 ###############################################################################
 - name: Web Tier - Nginx Setup
   hosts: web
@@ -97,14 +79,12 @@
     app_ip: "{{ hostvars['localhost']['app_ip'] }}"
 
   tasks:
-    - name: Install Nginx
-      apt:
+    - apt:
         name: nginx
         state: present
         update_cache: yes
 
-    - name: Configure Nginx reverse proxy
-      copy:
+    - copy:
         dest: /etc/nginx/sites-available/default
         content: |
           server {
@@ -114,8 +94,7 @@
               }
           }
 
-    - name: Restart Nginx
-      service:
+    - service:
         name: nginx
         state: restarted
         enabled: yes
