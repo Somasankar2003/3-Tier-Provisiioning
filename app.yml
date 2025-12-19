@@ -22,8 +22,7 @@
     os_interface: "public"
 
   tasks:
-    - name: Verify App VM name
-      debug:
+    - debug:
         msg: "App VM name is {{ vm_name_app }}"
 
     - name: Create App VM
@@ -42,48 +41,56 @@
         flavor: "{{ vm_flavor }}"
         key_name: "{{ vm_keypair }}"
         network: "{{ vm_net }}"
+        security_groups: [default]
         wait: yes
         timeout: 600
       register: app_vm
 
-    - name: Save App IP
-      set_fact:
-        app_ip: "{{ app_vm.server.public_v4 }}"
+    - set_fact:
+        app_ip: >-
+          {{
+            app_vm.server.addresses
+            | dict2items
+            | map(attribute='value')
+            | first
+            | selectattr('version','equalto',4)
+            | map(attribute='addr')
+            | first
+          }}
 
-    - name: Add App VM to inventory
-      add_host:
-        name: "{{ app_vm.server.public_v4 }}"
+    - wait_for:
+        host: "{{ app_ip }}"
+        port: 22
+        delay: 20
+        timeout: 300
+
+    - add_host:
+        name: "{{ app_ip }}"
         groups: app
 
 ###############################################################################
 # APP TIER – APPLICATION SETUP
 ###############################################################################
-- name: App Tier - Application Setup
+- name: App Tier - App Setup
   hosts: app
   become: yes
   gather_facts: yes
 
   vars:
     db_host: "{{ hostvars['localhost']['db_ip'] }}"
-    db_name: appdb
-    db_user: appuser
-    db_password: "App@123"
 
   tasks:
-    - name: Install required packages
-      apt:
+    - apt:
         name:
           - python3
           - python3-pip
         state: present
         update_cache: yes
 
-    - name: Install PyMySQL
-      pip:
+    - pip:
         name: pymysql
 
-    - name: Create app code
-      copy:
+    - copy:
         dest: /opt/app.py
         mode: '0755'
         content: |
@@ -92,9 +99,9 @@
 
           conn = pymysql.connect(
               host="{{ db_host }}",
-              user="{{ db_user }}",
-              password="{{ db_password }}",
-              database="{{ db_name }}"
+              user="appuser",
+              password="App@123",
+              database="appdb"
           )
 
           class Handler(BaseHTTPRequestHandler):
@@ -103,13 +110,12 @@
                   cur.execute("SELECT name FROM users")
                   rows = cur.fetchall()
                   self.send_response(200)
-                  self.send_header("Content-type", "text/html")
+                  self.send_header("Content-type","text/html")
                   self.end_headers()
-                  self.wfile.write(b"<h1>Users from MySQL</h1>")
+                  self.wfile.write(b"<h1>Users</h1>")
                   for r in rows:
                       self.wfile.write(f"<p>{r[0]}</p>".encode())
 
-          HTTPServer(("", 8080), Handler).serve_forever()
+          HTTPServer(("",8080),Handler).serve_forever()
 
-    - name: Start application
-      shell: nohup python3 /opt/app.py &
+    - shell: nohup python3 /opt/app.py &
