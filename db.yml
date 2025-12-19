@@ -1,3 +1,6 @@
+###############################################################################
+# DB TIER – VM CREATION
+###############################################################################
 - name: DB Tier - VM Creation
   hosts: localhost
   connection: local
@@ -32,6 +35,7 @@
         region_name: "{{ os_region_name }}"
         interface: "{{ os_interface }}"
         api_version: "{{ os_identity_api_version }}"
+
         name: "{{ vm_name }}"
         image: "{{ vm_image }}"
         flavor: "{{ vm_flavor }}"
@@ -39,33 +43,44 @@
         networks:
           - uuid: "{{ vm_net }}"
         wait: yes
+        timeout: 600
       register: db_vm
 
-    - set_fact:
+    - name: Save DB IP for next plays
+      set_fact:
         db_ip: "{{ db_vm.server.public_v4 }}"
 
-    - add_host:
+    - name: Add DB VM to inventory
+      add_host:
         name: "{{ db_vm.server.public_v4 }}"
         groups: db
 
+###############################################################################
+# DB TIER – MYSQL CONFIGURATION
+###############################################################################
 - name: DB Tier - MySQL Setup
   hosts: db
   become: yes
+  gather_facts: yes
+
+  vars:
+    db_name: appdb
+    db_user: appuser
+    db_password: "App@123"
 
   tasks:
-    - name: Install MySQL server and client libs
+    - name: Install MySQL Server
       apt:
-        name:
-          - mysql-server
-          - python3-pymysql
+        name: mysql-server
         state: present
         update_cache: yes
 
-    - name: Allow MySQL remote access
+    - name: Allow MySQL remote connections
       lineinfile:
         path: /etc/mysql/mysql.conf.d/mysqld.cnf
         regexp: '^bind-address'
         line: 'bind-address = 0.0.0.0'
+        backup: yes
 
     - name: Restart MySQL
       service:
@@ -74,26 +89,28 @@
         enabled: yes
 
     - name: Create application database
-      community.mysql.mysql_db:
-        name: appdb
-        state: present
-        login_unix_socket: /var/run/mysqld/mysqld.sock
+      shell: |
+        mysql -e "CREATE DATABASE IF NOT EXISTS {{ db_name }};"
+      args:
+        executable: /bin/bash
 
-    - name: Create application DB user
-      community.mysql.mysql_user:
-        name: appuser
-        password: App@123
-        priv: "appdb.*:ALL"
-        host: "%"
-        state: present
-        login_unix_socket: /var/run/mysqld/mysqld.sock
+    - name: Create application DB user and grant privileges
+      shell: |
+        mysql -e "
+        CREATE USER IF NOT EXISTS '{{ db_user }}'@'%' IDENTIFIED BY '{{ db_password }}';
+        GRANT ALL PRIVILEGES ON {{ db_name }}.* TO '{{ db_user }}'@'%';
+        FLUSH PRIVILEGES;
+        "
+      args:
+        executable: /bin/bash
 
     - name: Create users table
-      community.mysql.mysql_query:
-        db: appdb
-        query: |
-          CREATE TABLE IF NOT EXISTS users (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            name VARCHAR(50)
-          );
-        login_unix_socket: /var/run/mysqld/mysqld.sock
+      shell: |
+        mysql {{ db_name }} -e "
+        CREATE TABLE IF NOT EXISTS users (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          name VARCHAR(50)
+        );
+        "
+      args:
+        executable: /bin/bash
