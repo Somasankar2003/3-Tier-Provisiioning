@@ -17,14 +17,22 @@
     os_project_domain_id: "default"
     os_username: "admin"
     os_user_domain_name: "Default"
-    os_password: "bLEZFvatBShkvUZyKrasUjmNdTTc9c3HcxWykrro"
+    os_password: "{{ os_password }}"
     os_region_name: "RegionOne"
     os_interface: "public"
 
-  tasks:
-    - debug:
-        msg: "App VM name is {{ vm_name_app }}"
+    cloud_init: |
+      #cloud-config
+      users:
+        - name: ansible
+          sudo: ALL=(ALL) NOPASSWD:ALL
+          shell: /bin/bash
+          ssh_authorized_keys:
+            - {{ lookup('env','SSH_PUBLIC_KEY') }}
+      ssh_pwauth: false
+      disable_root: true
 
+  tasks:
     - name: Create App VM
       openstack.cloud.server:
         auth:
@@ -41,81 +49,92 @@
         flavor: "{{ vm_flavor }}"
         key_name: "{{ vm_keypair }}"
         network: "{{ vm_net }}"
+        userdata: "{{ cloud_init }}"
         security_groups: [default]
         wait: yes
-        timeout: 600
       register: app_vm
 
-    - set_fact:
+    - name: Extract App private IP
+      set_fact:
         app_ip: >-
           {{
             app_vm.server.addresses
-            | dict2items
-            | map(attribute='value')
-            | first
+            | dict2items | map(attribute='value') | first
             | selectattr('version','equalto',4)
-            | map(attribute='addr')
-            | first
+            | map(attribute='addr') | first
           }}
 
-    - wait_for:
+    - name: Wait for SSH
+      wait_for:
         host: "{{ app_ip }}"
         port: 22
-        delay: 20
         timeout: 300
 
-    - add_host:
+    - name: Add App host
+      add_host:
         name: "{{ app_ip }}"
         groups: app
 
 ###############################################################################
-# APP TIER – APPLICATION SETUP
+# APP TIER – APPLICATION SETUP (CONNECTED TO DB)
 ###############################################################################
-- name: App Tier - App Setup
+- name: App Tier - Application Setup
   hosts: app
   become: yes
   gather_facts: yes
 
   vars:
     db_host: "{{ hostvars['localhost']['db_ip'] }}"
+    db_name: appdb
+    db_user: appuser
+    db_password: "App@123"
 
   tasks:
-    - apt:
+    - name: Install dependencies
+      apt:
         name:
           - python3
           - python3-pip
         state: present
         update_cache: yes
 
-    - pip:
+    - name: Install PyMySQL
+      pip:
         name: pymysql
 
-    - copy:
+    - name: Deploy application code
+      copy:
         dest: /opt/app.py
         mode: '0755'
         content: |
           import pymysql
           from http.server import BaseHTTPRequestHandler, HTTPServer
 
-          conn = pymysql.connect(
-              host="{{ db_host }}",
-              user="appuser",
-              password="App@123",
-              database="appdb"
-          )
+          def get_users():
+              conn = pymysql.connect(
+                  host="{{ db_host }}",
+                  user="{{ db_user }}",
+                  password="{{ db_password }}",
+                  database="{{ db_name }}"
+              )
+              cur = conn.cursor()
+              cur.execute("SELECT name FROM users")
+              data = cur.fetchall()
+              conn.close()
+              return data
 
           class Handler(BaseHTTPRequestHandler):
               def do_GET(self):
-                  cur = conn.cursor()
-                  cur.execute("SELECT name FROM users")
-                  rows = cur.fetchall()
+                  users = get_users()
                   self.send_response(200)
                   self.send_header("Content-type","text/html")
                   self.end_headers()
-                  self.wfile.write(b"<h1>Users</h1>")
-                  for r in rows:
-                      self.wfile.write(f"<p>{r[0]}</p>".encode())
+                  self.wfile.write(b"<h1>Users from Database</h1>")
+                  for u in users:
+                      self.wfile.write(f"<p>{u[0]}</p>".encode())
 
-          HTTPServer(("",8080),Handler).serve_forever()
+          HTTPServer(("",8080), Handler).serve_forever()
 
-    - shell: nohup python3 /opt/app.py &
+    - name: Run application
+      shell: |
+        nohup python3 /opt/app.py > /var/log/app.log 2>&1 &
