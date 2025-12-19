@@ -1,39 +1,26 @@
-###############################################################################
-# WEB TIER – VM CREATION
-###############################################################################
-- name: Web Tier - VM Creation
+- name: Web Tier
   hosts: localhost
   connection: local
   gather_facts: no
 
   vars:
-    vm_flavor: "cmp"
-    vm_image: "a997754d-6cdf-4a21-8e52-5df389d3f7c5"
-    vm_keypair: "k8s"
-    vm_net: "cb24a95d-378a-470b-9647-4849caca9fb2"
+    vm_name_web: "{{ vm_name_web }}"
+    vm_image: a997754d-6cdf-4a21-8e52-5df389d3f7c5
+    vm_flavor: cmp
+    vm_net: cb24a95d-378a-470b-9647-4849caca9fb2
+    vm_keypair: k1s
 
-    os_auth_url: "http://192.168.170.50:5000"
+    os_auth_url: http://192.168.170.50:5000
+    os_username: admin
+    os_password: bLEZFvatBShkvUZyKrasUjmNdTTc9c3HcxWykrro
     os_project_name: "Production Engineering"
-    os_project_domain_id: "default"
-    os_username: "admin"
-    os_user_domain_name: "Default"
-    os_password: "bLEZFvatBShkvUZyKrasUjmNdTTc9c3HcxWykrro"
-    os_region_name: "RegionOne"
-    os_interface: "public"
-
-    cloud_init: |
-      #cloud-config
-      users:
-        - name: ansible
-          sudo: ALL=(ALL) NOPASSWD:ALL
-          shell: /bin/bash
-          ssh_authorized_keys:
-            - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC+/HZun5X1/zRdQO8n0ozpeuHOD8nU0vxEtCAPLa/eCMphjnAR3oV9wNCkfiBkrgPWEJrJITBs0BHwYXm8R125AjYhUWUL6od354j73F05mjesl2EY4xD6MAGEtq/iS6HhyNGWgGFnJxNcxK1xA985IM4ESg65NE8L0J6s6eQYYCY6gA5BruvJZZR/q6plCy5aMm6JtEVQfOq4ZuAAeVzytlfKofYueDhn8TseqZbvA+v4EYY5KQPEjxPvxejxtnhxICAk1cWtOmDsIOTZXuW5wK16hnbo9rMuz8D1WzAw1YRt8lRVTG6jIfuayZyUab+31gnbJb2S7zHeDOlp8NvR Generated-by-Nova
-      ssh_pwauth: false
-      disable_root: false
+    os_project_domain_id: default
+    os_user_domain_name: Default
+    os_region_name: RegionOne
+    os_interface: public
 
   tasks:
-    - name: Create Web VM
+    - name: Create WEB VM
       openstack.cloud.server:
         auth:
           auth_url: "{{ os_auth_url }}"
@@ -47,36 +34,23 @@
         name: "{{ vm_name_web }}"
         image: "{{ vm_image }}"
         flavor: "{{ vm_flavor }}"
-        key_name: "{{ vm_keypair }}"
         network: "{{ vm_net }}"
-        userdata: "{{ cloud_init }}"
-        security_groups: [default]
+        key_name: "{{ vm_keypair }}"
+        userdata: "{{ hostvars['localhost']['cloud_init'] }}"
         wait: yes
       register: web_vm
 
     - set_fact:
         web_ip: "{{ web_vm.server.addresses | dict2items | map(attribute='value') | first | selectattr('version','equalto',4) | map(attribute='addr') | first }}"
 
-    - wait_for:
-        host: "{{ web_ip }}"
-        port: 22
-        timeout: 300
-
     - add_host:
         name: "{{ web_ip }}"
         groups: web
         ansible_user: ansible
 
-###############################################################################
-# WEB TIER – NGINX
-###############################################################################
-- name: Web Tier - Nginx Setup
+- name: Nginx
   hosts: web
   become: yes
-  gather_facts: yes
-
-  vars:
-    app_ip: "{{ hostvars['localhost']['app_ip'] }}"
 
   tasks:
     - apt:
@@ -88,10 +62,10 @@
         dest: /etc/nginx/sites-available/default
         content: |
           server {
-              listen 80;
-              location / {
-                  proxy_pass http://{{ app_ip }}:8080;
-              }
+            listen 80;
+            location / {
+              proxy_pass http://{{ hostvars['localhost']['app_ip'] }}:8080;
+            }
           }
 
     - service:
