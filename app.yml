@@ -68,7 +68,7 @@
         name: "{{ app_ip }}"
         groups: app
         ansible_user: root
-        ansible_password: StrongPasswordHere
+        ansible_password: Stackmax
 
 ###############################################################################
 # APP TIER – APPLICATION
