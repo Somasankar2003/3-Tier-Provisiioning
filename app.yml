@@ -55,28 +55,40 @@
         wait: yes
       register: app_vm
 
-    - set_fact:
-        app_ip: "{{ app_vm.server.addresses | dict2items | map(attribute='value') | first | selectattr('version','equalto',4) | map(attribute='addr') | first }}"
+    - name: Extract APP IP
+      set_fact:
+        app_ip: >-
+          {{
+            app_vm.server.addresses
+            | dict2items
+            | map(attribute='value')
+            | first
+            | selectattr('version','equalto',4)
+            | map(attribute='addr')
+            | first
+          }}
 
     - name: Expose APP IP to workflow
       set_stats:
         data:
           app_ip: "{{ app_ip }}"
 
-    - wait_for:
+    - name: Wait for SSH on APP VM
+      wait_for:
         host: "{{ app_ip }}"
         port: 22
         delay: 40
         timeout: 600
 
-    - add_host:
+    - name: Add APP host
+      add_host:
         name: "{{ app_ip }}"
         groups: app
         ansible_user: root
         ansible_password: Stackmax
 
 ###############################################################################
-# APP TIER – APPLICATION
+# APP TIER – APPLICATION SETUP
 ###############################################################################
 - name: App Tier - App Setup
   hosts: app
@@ -84,18 +96,33 @@
   gather_facts: yes
 
   vars:
-    db_host: "{{ db_ip }}"
+    # db_ip MUST come from DB job via set_stats (workflow)
+    db_host: "{{ db_ip | default(db_ip_fallback, true) }}"
+
+  pre_tasks:
+    - name: Fail if DB IP is not provided
+      fail:
+        msg: >
+          db_ip is not defined.
+          Run this job ONLY via the Workflow (DB → APP),
+          or provide db_ip_fallback via survey.
+      when: db_host is not defined
 
   tasks:
-    - apt:
-        name: [python3, python3-pip]
+    - name: Install dependencies
+      apt:
+        name:
+          - python3
+          - python3-pip
         state: present
         update_cache: yes
 
-    - pip:
+    - name: Install PyMySQL
+      pip:
         name: pymysql
 
-    - copy:
+    - name: Deploy application
+      copy:
         dest: /opt/app.py
         mode: '0755'
         content: |
@@ -123,6 +150,7 @@
                   for u in users:
                       self.wfile.write(f"{u[0]}<br>".encode())
 
-          HTTPServer(("",8080),Handler).serve_forever()
+          HTTPServer(("", 8080), Handler).serve_forever()
 
-    - shell: nohup python3 /opt/app.py &
+    - name: Start application
+      shell: nohup python3 /opt/app.py > /var/log/app.log 2>&1 &
