@@ -21,6 +21,19 @@
     os_region_name: "RegionOne"
     os_interface: "public"
 
+    # 🔑 CLOUD-INIT (SSH FIX)
+    cloud_init: |
+      #cloud-config
+      users:
+        - name: ansible
+          sudo: ALL=(ALL) NOPASSWD:ALL
+          shell: /bin/bash
+          groups: sudo
+          ssh_authorized_keys:
+            - {{ lookup('env', 'SSH_PUBLIC_KEY') }}
+      ssh_pwauth: false
+      disable_root: true
+
   tasks:
     - debug:
         msg: "DB VM name is {{ vm_name_db }}"
@@ -42,6 +55,7 @@
         key_name: "{{ vm_keypair }}"
         network: "{{ vm_net }}"
         security_groups: [default]
+        userdata: "{{ cloud_init }}"
         wait: yes
         timeout: 600
       register: db_vm
