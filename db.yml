@@ -23,16 +23,15 @@
 
     cloud_init: |
       #cloud-config
-      users:
-        - name: ansible
-          sudo: ALL=(ALL) NOPASSWD:ALL
-          shell: /bin/bash
-          ssh_authorized_keys:
-            - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCYTFyfBYWqV9TOFeKODgLfgFuCd8redSgZpRcMTPAtT57H4SlvI7oLzQKqDnzknrKh1hFL4YglwhXEdedvqAbhm5lE5z8HUj1bO1BsLJ1OtJSD/55olZe7yxJn4dE0GMAQ9+S5Mdp rcItVQ9RGAzj74rajUA/BtufOwra2XBUZbEA6G9qNuYqGLVl4KVmN7opaTWzeto v7h9dIaxE8fn7LoE5VPOE2kT/fU5l/bhIFnD/vYhVzXP Hxryrnkx2iUBH3vubsXdF3L2vqOFmV5fpOqXOPvEgeattkM0EXa5IliEmwauVuLH5/69KfPatXbKsnY+sC83+yvQiQHjxgCanCc
-      ssh_pwauth: false
       disable_root: false
+      ssh_pwauth: true
+      chpasswd:
+        list: |
+          root:Stackmax
+        expire: false
       runcmd:
-        - systemctl enable ssh || systemctl enable sshd
+        - sed -i 's/^#\?PermitRootLogin .*/PermitRootLogin yes/' /etc/ssh/sshd_config
+        - sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config
         - systemctl restart ssh || systemctl restart sshd
 
   tasks:
@@ -56,24 +55,23 @@
         wait: yes
       register: db_vm
 
-    - name: Extract DB IP
-      set_fact:
+    - set_fact:
         db_ip: "{{ db_vm.server.addresses | dict2items | map(attribute='value') | first | selectattr('version','equalto',4) | map(attribute='addr') | first }}"
 
-    - name: Wait for SSH (DB)
-      wait_for:
+    - wait_for:
         host: "{{ db_ip }}"
         port: 22
-        delay: 30
+        delay: 40
         timeout: 600
 
     - add_host:
         name: "{{ db_ip }}"
         groups: db
-        ansible_user: ansible
+        ansible_user: root
+        ansible_password: StrongPasswordHere
 
 ###############################################################################
-# DB TIER – MYSQL CONFIG
+# DB TIER – MYSQL SETUP
 ###############################################################################
 - name: DB Tier - MySQL Setup
   hosts: db
