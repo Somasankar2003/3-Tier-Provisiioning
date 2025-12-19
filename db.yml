@@ -71,7 +71,7 @@
         ansible_password: Stackmax
 
 ###############################################################################
-# DB TIER – MYSQL SETUP
+# DB TIER – MYSQL SETUP (FIXED)
 ###############################################################################
 - name: DB Tier - MySQL Setup
   hosts: db
@@ -79,12 +79,22 @@
   gather_facts: yes
 
   tasks:
-    - apt:
+    - name: Install MySQL
+      apt:
         name: mysql-server
         state: present
         update_cache: yes
 
-    - shell: |
+    # ✅ CRITICAL FIX
+    - name: Allow MySQL remote connections
+      lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^bind-address'
+        line: 'bind-address = 0.0.0.0'
+      notify: Restart MySQL
+
+    - name: Create database and user
+      shell: |
         mysql -e "
         CREATE DATABASE IF NOT EXISTS appdb;
         CREATE USER IF NOT EXISTS 'appuser'@'%' IDENTIFIED BY 'App@123';
@@ -95,3 +105,11 @@
           name VARCHAR(50)
         );
         "
+      args:
+        executable: /bin/bash
+
+  handlers:
+    - name: Restart MySQL
+      service:
+        name: mysql
+        state: restarted
