@@ -19,14 +19,13 @@
     os_user_domain_name: "Default"
     os_password: "bLEZFvatBShkvUZyKrasUjmNdTTc9c3HcxWykrro"
     os_region_name: "RegionOne"
-    os_interface: "public"
+    os_interface: "internal"
 
   tasks:
-    - name: Verify Web VM name
-      debug:
-        msg: "Web VM name is {{ vm_name_web }}"
+    - debug:
+        msg: "Creating Web VM with name {{ vm_name_web }}"
 
-    - name: Create Web VM
+    - name: Create Web VM (boot from volume)
       openstack.cloud.server:
         auth:
           auth_url: "{{ os_auth_url }}"
@@ -38,16 +37,18 @@
         region_name: "{{ os_region_name }}"
         interface: "{{ os_interface }}"
         name: "{{ vm_name_web }}"
-        image: "{{ vm_image }}"
         flavor: "{{ vm_flavor }}"
+        image: "{{ vm_image }}"
         key_name: "{{ vm_keypair }}"
         network: "{{ vm_net }}"
+        boot_from_volume: true
+        volume_size: 20
+        terminate_volume: true
         wait: yes
         timeout: 600
       register: web_vm
 
-    - name: Add Web VM to inventory
-      add_host:
+    - add_host:
         name: "{{ web_vm.server.public_v4 }}"
         groups: web
 
@@ -63,14 +64,12 @@
     app_ip: "{{ hostvars['localhost']['app_ip'] }}"
 
   tasks:
-    - name: Install Nginx
-      apt:
+    - apt:
         name: nginx
         state: present
         update_cache: yes
 
-    - name: Configure Nginx reverse proxy
-      copy:
+    - copy:
         dest: /etc/nginx/sites-available/default
         content: |
           server {
@@ -80,8 +79,7 @@
               }
           }
 
-    - name: Restart Nginx
-      service:
+    - service:
         name: nginx
         state: restarted
         enabled: yes
