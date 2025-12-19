@@ -27,7 +27,7 @@
       ssh_pwauth: true
       chpasswd:
         list: |
-          root:StrongPasswordHere
+          root:Stackmax
         expire: false
       runcmd:
         - sed -i 's/^#\?PermitRootLogin .*/PermitRootLogin yes/' /etc/ssh/sshd_config
