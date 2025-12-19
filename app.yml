@@ -55,12 +55,10 @@
         wait: yes
       register: app_vm
 
-    - name: Extract APP IP
-      set_fact:
+    - set_fact:
         app_ip: "{{ app_vm.server.addresses | dict2items | map(attribute='value') | first | selectattr('version','equalto',4) | map(attribute='addr') | first }}"
 
-    - name: Expose APP IP to workflow
-      set_stats:
+    - set_stats:
         data:
           app_ip: "{{ app_ip }}"
 
@@ -85,15 +83,7 @@
   gather_facts: yes
 
   vars:
-    db_host: "{{ db_ip | default(db_ip_fallback | default(omit), true) }}"
-
-  pre_tasks:
-    - name: Validate DB IP availability
-      fail:
-        msg: >
-          No DB IP provided.
-          Run via Workflow (DB → APP) or provide db_ip_fallback in survey.
-      when: db_host is not defined
+    db_host: "{{ db_ip }}"
 
   tasks:
     - name: Install dependencies
@@ -104,9 +94,12 @@
         state: present
         update_cache: yes
 
-    - name: Install PyMySQL
-      pip:
+    - pip:
         name: pymysql
+
+    - name: Allow APP port
+      shell: |
+        ufw allow 8080 || true
 
     - name: Deploy application
       copy:
@@ -116,28 +109,39 @@
           import pymysql
           from http.server import BaseHTTPRequestHandler, HTTPServer
 
-          def get_users():
-              conn = pymysql.connect(
-                  host="{{ db_host }}",
-                  user="appuser",
-                  password="App@123",
-                  database="appdb"
-              )
-              cur = conn.cursor()
-              cur.execute("SELECT name FROM users")
-              rows = cur.fetchall()
-              conn.close()
-              return rows
-
           class Handler(BaseHTTPRequestHandler):
               def do_GET(self):
-                  users = get_users()
-                  self.send_response(200)
-                  self.end_headers()
-                  for u in users:
-                      self.wfile.write(f"{u[0]}<br>".encode())
+                  try:
+                      conn = pymysql.connect(
+                          host="{{ db_host }}",
+                          user="appuser",
+                          password="App@123",
+                          database="appdb",
+                          connect_timeout=5
+                      )
+                      cur = conn.cursor()
+                      cur.execute("SELECT name FROM users")
+                      rows = cur.fetchall()
+                      conn.close()
 
-          HTTPServer(("", 8080), Handler).serve_forever()
+                      response = ""
+                      for r in rows:
+                          response += f"{r[0]}<br>"
+
+                      self.send_response(200)
+                      self.send_header("Content-Type", "text/html")
+                      self.send_header("Content-Length", str(len(response)))
+                      self.end_headers()
+                      self.wfile.write(response.encode())
+
+                  except Exception as e:
+                      self.send_response(500)
+                      self.end_headers()
+                      self.wfile.write(str(e).encode())
+
+          HTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
 
     - name: Start application
-      shell: nohup python3 /opt/app.py > /var/log/app.log 2>&1 &
+      shell: |
+        pkill -f app.py || true
+        nohup python3 /opt/app.py > /var/log/app.log 2>&1 &
