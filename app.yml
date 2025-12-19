@@ -58,6 +58,11 @@
     - set_fact:
         app_ip: "{{ app_vm.server.addresses | dict2items | map(attribute='value') | first | selectattr('version','equalto',4) | map(attribute='addr') | first }}"
 
+    - name: Expose APP IP to workflow
+      set_stats:
+        data:
+          app_ip: "{{ app_ip }}"
+
     - wait_for:
         host: "{{ app_ip }}"
         port: 22
@@ -79,7 +84,7 @@
   gather_facts: yes
 
   vars:
-    db_host: "{{ hostvars['localhost']['db_ip'] }}"
+    db_host: "{{ db_ip }}"
 
   tasks:
     - apt:
