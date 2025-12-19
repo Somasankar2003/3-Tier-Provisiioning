@@ -12,7 +12,7 @@
     vm_keypair: "k8s"
     vm_net: "cb24a95d-378a-470b-9647-4849caca9fb2"
 
-    os_auth_url: "http://192.168.170.50:5000"
+    os_auth_url: "http://192.168.170.51:5000"
     os_project_name: "Production Engineering"
     os_project_domain_id: "default"
     os_username: "admin"
