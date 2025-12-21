@@ -1,5 +1,5 @@
 ###############################################################################
-# APP TIER – VM CREATION + APPLICATION SETUP
+# APP TIER – VM CREATION + APPLICATION SETUP (FIXED)
 ###############################################################################
 - name: App Tier - Provision & Configure
   hosts: localhost
@@ -102,7 +102,8 @@
         state: present
         update_cache: yes
 
-    - pip:
+    - name: Install PyMySQL
+      pip:
         name: pymysql
 
     - name: Wait for DB
@@ -111,7 +112,7 @@
         port: 3306
         timeout: 120
 
-    - name: Deploy interactive app
+    - name: Deploy interactive app (FIXED TEMPLATE)
       copy:
         dest: /opt/app.py
         mode: '0755'
@@ -133,15 +134,15 @@
                   database=DB_NAME
               )
 
-          def users():
+          def get_users():
               c = conn()
               cur = c.cursor()
               cur.execute("SELECT name FROM users ORDER BY id DESC")
-              r = cur.fetchall()
+              rows = cur.fetchall()
               c.close()
-              return r
+              return rows
 
-          def add(name):
+          def add_user(name):
               c = conn()
               cur = c.cursor()
               cur.execute("INSERT INTO users (name) VALUES (%s)", (name,))
@@ -169,35 +170,36 @@
                 <input name="username" placeholder="Add user" required>
                 <button>Add</button>
               </form>
-              {%users%}
+              __USERS__
             </div>
           </body>
           </html>
           """
 
-          class H(BaseHTTPRequestHandler):
+          class Handler(BaseHTTPRequestHandler):
               def do_GET(self):
-                  ul = ""
-                  for u in users():
-                      ul += f"<div class='u'>👤 {u[0]}</div>"
-                  page = HTML.replace("{%users%}", ul)
-                  d = page.encode()
+                  users_html = ""
+                  for u in get_users():
+                      users_html += f"<div class='u'>👤 {u[0]}</div>"
+                  page = HTML.replace("__USERS__", users_html)
+                  data = page.encode()
                   self.send_response(200)
                   self.send_header("Content-Type", "text/html")
-                  self.send_header("Content-Length", str(len(d)))
+                  self.send_header("Content-Length", str(len(data)))
                   self.end_headers()
-                  self.wfile.write(d)
+                  self.wfile.write(data)
 
               def do_POST(self):
-                  l = int(self.headers.get("Content-Length", 0))
-                  p = parse_qs(self.rfile.read(l).decode())
-                  if "username" in p:
-                      add(p["username"][0])
+                  length = int(self.headers.get("Content-Length", 0))
+                  body = self.rfile.read(length).decode()
+                  params = parse_qs(body)
+                  if "username" in params:
+                      add_user(params["username"][0])
                   self.send_response(303)
                   self.send_header("Location", "/")
                   self.end_headers()
 
-          HTTPServer(("0.0.0.0", 8080), H).serve_forever()
+          HTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
 
     - name: Start app
       shell: nohup python3 /opt/app.py > /var/log/app.log 2>&1 &
