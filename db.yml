@@ -1,12 +1,13 @@
 ###############################################################################
-# DB TIER – VM CREATION
+# DB TIER – VM CREATION + MYSQL SETUP
 ###############################################################################
-- name: DB Tier - VM Creation
+- name: DB Tier - Provision & Configure
   hosts: localhost
   connection: local
   gather_facts: no
 
   vars:
+    vm_name_db: db-vm
     vm_image: a997754d-6cdf-4a21-8e52-5df389d3f7c5
     vm_flavor: 2C_4R_150
     vm_net: cb24a95d-378a-470b-9647-4849caca9fb2
@@ -59,12 +60,12 @@
       set_fact:
         db_ip: "{{ db_vm.server.addresses | dict2items | map(attribute='value') | first | selectattr('version','equalto',4) | map(attribute='addr') | first }}"
 
-    - name: Expose DB IP to workflow
+    - name: Export DB IP to workflow
       set_stats:
         data:
           db_ip: "{{ db_ip }}"
 
-    - name: Wait for SSH on DB VM
+    - name: Wait for SSH
       wait_for:
         host: "{{ db_ip }}"
         port: 22
@@ -79,21 +80,21 @@
         ansible_password: Stackmax
 
 ###############################################################################
-# DB TIER – MYSQL SETUP (FIXED & FINAL)
+# MYSQL CONFIGURATION
 ###############################################################################
 - name: DB Tier - MySQL Setup
   hosts: db
   become: yes
-  gather_facts: yes
+  gather_facts: no
 
   tasks:
-    - name: Install MySQL Server
+    - name: Install MySQL
       apt:
         name: mysql-server
         state: present
         update_cache: yes
 
-    - name: Allow MySQL remote connections
+    - name: Allow remote MySQL access
       lineinfile:
         path: /etc/mysql/mysql.conf.d/mysqld.cnf
         regexp: '^bind-address'
@@ -105,7 +106,7 @@
         state: restarted
         enabled: yes
 
-    - name: Create database, user, and table
+    - name: Create DB, user & table
       shell: |
         mysql -e "
         CREATE DATABASE IF NOT EXISTS appdb;
@@ -116,4 +117,5 @@
           id INT AUTO_INCREMENT PRIMARY KEY,
           name VARCHAR(50)
         );
+        INSERT INTO appdb.users (name) VALUES ('Alice'), ('Bob');
         "
