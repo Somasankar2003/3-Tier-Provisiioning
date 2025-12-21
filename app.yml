@@ -1,12 +1,13 @@
 ###############################################################################
-# APP TIER – VM CREATION
+# APP TIER – VM CREATION + APPLICATION SETUP
 ###############################################################################
-- name: App Tier - VM Creation
+- name: App Tier - Provision & Configure
   hosts: localhost
   connection: local
   gather_facts: no
 
   vars:
+    vm_name_app: app-vm
     vm_image: a997754d-6cdf-4a21-8e52-5df389d3f7c5
     vm_flavor: cmp
     vm_net: cb24a95d-378a-470b-9647-4849caca9fb2
@@ -35,6 +36,11 @@
         - systemctl restart ssh || systemctl restart sshd
 
   tasks:
+    - name: Ensure DB IP is available
+      fail:
+        msg: "db_ip not received from DB job"
+      when: db_ip is not defined
+
     - name: Create APP VM
       openstack.cloud.server:
         auth:
@@ -55,7 +61,8 @@
         wait: yes
       register: app_vm
 
-    - set_fact:
+    - name: Extract APP IP
+      set_fact:
         app_ip: "{{ app_vm.server.addresses | dict2items | map(attribute='value') | first | selectattr('version','equalto',4) | map(attribute='addr') | first }}"
 
     - set_stats:
@@ -75,9 +82,9 @@
         ansible_password: Stackmax
 
 ###############################################################################
-# APP TIER – APPLICATION SETUP (FIXED)
+# APPLICATION SETUP
 ###############################################################################
-- name: App Tier - App Setup
+- name: App Tier - Application Setup
   hosts: app
   become: yes
   gather_facts: no
@@ -86,7 +93,7 @@
     db_host: "{{ db_ip }}"
 
   tasks:
-    - name: Install dependencies (INCLUDING MYSQL CLIENT)
+    - name: Install dependencies
       apt:
         name:
           - python3
@@ -95,56 +102,102 @@
         state: present
         update_cache: yes
 
-    - name: Install PyMySQL
-      pip:
+    - pip:
         name: pymysql
 
-    - name: Wait for DB to be reachable
+    - name: Wait for DB
       wait_for:
         host: "{{ db_host }}"
         port: 3306
         timeout: 120
 
-    - name: Deploy application
+    - name: Deploy interactive app
       copy:
         dest: /opt/app.py
         mode: '0755'
         content: |
           import pymysql
           from http.server import BaseHTTPRequestHandler, HTTPServer
+          from urllib.parse import parse_qs
 
-          def get_users():
-              conn = pymysql.connect(
-                  host="{{ db_host }}",
-                  user="appuser",
-                  password="App@123",
-                  database="appdb",
-                  connect_timeout=5
+          DB_HOST = "{{ db_host }}"
+          DB_USER = "appuser"
+          DB_PASS = "App@123"
+          DB_NAME = "appdb"
+
+          def conn():
+              return pymysql.connect(
+                  host=DB_HOST,
+                  user=DB_USER,
+                  password=DB_PASS,
+                  database=DB_NAME
               )
-              cur = conn.cursor()
-              cur.execute("SELECT name FROM users")
-              rows = cur.fetchall()
-              conn.close()
-              return rows
 
-          class Handler(BaseHTTPRequestHandler):
+          def users():
+              c = conn()
+              cur = c.cursor()
+              cur.execute("SELECT name FROM users ORDER BY id DESC")
+              r = cur.fetchall()
+              c.close()
+              return r
+
+          def add(name):
+              c = conn()
+              cur = c.cursor()
+              cur.execute("INSERT INTO users (name) VALUES (%s)", (name,))
+              c.commit()
+              c.close()
+
+          HTML = """
+          <html>
+          <head>
+            <title>3-Tier Demo</title>
+            <style>
+              body { font-family: Arial; background: #667eea; }
+              .box { background: white; padding: 20px; width: 400px;
+                     margin: 60px auto; border-radius: 10px; }
+              h2 { text-align: center; }
+              input { width: 70%; padding: 8px; }
+              button { padding: 8px; background: #667eea; color: white; border: none; }
+              .u { background: #f2f2f2; margin: 5px; padding: 8px; border-radius: 5px; }
+            </style>
+          </head>
+          <body>
+            <div class="box">
+              <h2>🚀 3-Tier App</h2>
+              <form method="POST">
+                <input name="username" placeholder="Add user" required>
+                <button>Add</button>
+              </form>
+              {%users%}
+            </div>
+          </body>
+          </html>
+          """
+
+          class H(BaseHTTPRequestHandler):
               def do_GET(self):
-                  users = get_users()
-                  body = "<html><body><h2>Users</h2>"
-                  for u in users:
-                      body += f"<p>{u[0]}</p>"
-                  body += "</body></html>"
-
-                  data = body.encode()
+                  ul = ""
+                  for u in users():
+                      ul += f"<div class='u'>👤 {u[0]}</div>"
+                  page = HTML.replace("{%users%}", ul)
+                  d = page.encode()
                   self.send_response(200)
                   self.send_header("Content-Type", "text/html")
-                  self.send_header("Content-Length", str(len(data)))
+                  self.send_header("Content-Length", str(len(d)))
                   self.end_headers()
-                  self.wfile.write(data)
+                  self.wfile.write(d)
 
-          HTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
+              def do_POST(self):
+                  l = int(self.headers.get("Content-Length", 0))
+                  p = parse_qs(self.rfile.read(l).decode())
+                  if "username" in p:
+                      add(p["username"][0])
+                  self.send_response(303)
+                  self.send_header("Location", "/")
+                  self.end_headers()
 
-    - name: Start application
-      shell: |
-        nohup python3 /opt/app.py > /var/log/app.log 2>&1 &
+          HTTPServer(("0.0.0.0", 8080), H).serve_forever()
 
+    - name: Start app
+      shell: nohup python3 /opt/app.py > /var/log/app.log 2>&1 &
