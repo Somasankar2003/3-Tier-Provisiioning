@@ -165,7 +165,7 @@
           </head>
           <body>
             <div class="box">
-              <h2>🚀 3-Tier App</h2>
+              <h2>3-Tier App</h2>
               <form method="POST">
                 <input name="username" placeholder="Add user" required>
                 <button>Add</button>
@@ -180,7 +180,7 @@
               def do_GET(self):
                   users_html = ""
                   for u in get_users():
-                      users_html += f"<div class='u'>👤 {u[0]}</div>"
+                      users_html += f"<div class='u'> {u[0]}</div>"
                   page = HTML.replace("__USERS__", users_html)
                   data = page.encode()
                   self.send_response(200)
